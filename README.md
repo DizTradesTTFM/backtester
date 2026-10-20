@@ -27,6 +27,8 @@ You never edit code. You double-click `.bat` files.
 
 ## How a strategy is judged
 
+The data is 1-minute bars, but most strategies read their signals off 5, 15 or 30-minute charts built from it (the `tf` setting). Fills and stops are still checked minute by minute, so the test sees what happened inside each bigger bar.
+
 Every combo runs on the full history, split into:
 
 - **Training (older 70%)**: used to rank.

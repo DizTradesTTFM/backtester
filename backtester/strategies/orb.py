@@ -1,6 +1,6 @@
 import numpy as np
 
-from .base import RTH_OPEN, build, default_force_exit, entry_window, first_per_day
+from .base import RTH_OPEN, build, default_force_exit, entry_window, first_per_day, to_timeframe
 
 NAME = "orb"
 DESCRIPTION = "Opening range breakout: trade the first break of the first N minutes' high/low."
@@ -10,6 +10,7 @@ PARAM_GRID = {
     "rr": [1.0, 1.5, 2.0, 3.0],  # target = rr x stop
     "entry_end": [1100, 1300],
     "side": ["both", "long"],
+    "confirm_tf": [1, 5],  # breakout must close outside the range on this chart (minutes)
 }
 
 
@@ -34,6 +35,12 @@ def generate(bars, p):
     rng = or_hi - or_lo
     long_m = window & (bars.close > or_hi)
     short_m = window & (bars.close < or_lo)
+    if p["confirm_tf"] > 1:
+        _, ends = to_timeframe(bars, p["confirm_tf"])
+        on_close = np.zeros(n, bool)
+        on_close[ends] = True
+        long_m &= on_close
+        short_m &= on_close
     first = first_per_day(long_m | short_m, bars.day)
     stop = rng * p["stop_mult"]
     return build(bars, long_m & first, short_m & first, stop, stop * p["rr"], default_force_exit(bars), p["side"])

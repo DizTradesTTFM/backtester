@@ -115,3 +115,17 @@ def test_trades_are_flat_by_close():
     assert len(t) > 0
     assert (bars.day[t.entry_i] == bars.day[t.exit_i]).all()
     assert (bars.minute[t.exit_i] <= 15 * 60 + 59).all()
+
+
+def test_timeframe_signals_fire_on_bigger_bar_close():
+    from backtester.strategies.base import to_timeframe
+
+    bars = bars_from_frame(make_sample_bars(days=3), "ES")
+    big, ends = to_timeframe(bars, 15)
+    assert len(big) == 3 * 26  # 390 minutes / 15
+    assert big.high[0] == bars.high[:15].max() and big.close[0] == bars.close[14]
+    assert ends[0] == 14 and big.minute[0] == 9 * 60 + 45
+    mod = STRATEGIES["ema_trend"]
+    sig = mod.generate(bars, {**param_combos(mod)[0], "tf": 15})
+    fired = np.flatnonzero(sig.entry)
+    assert len(fired) and np.isin(fired, ends).all()

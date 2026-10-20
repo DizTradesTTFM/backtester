@@ -1,11 +1,12 @@
 import numpy as np
 
 from ..indicators import atr, ema
-from .base import build, default_force_exit, entry_window
+from .base import build, default_force_exit, entry_window, expand, to_timeframe
 
 NAME = "ema_trend"
 DESCRIPTION = "Moving average crossover: go with the trend when the fast EMA crosses the slow EMA."
 PARAM_GRID = {
+    "tf": [5, 15, 30],  # chart timeframe in minutes
     "fast": [5, 9, 20],
     "slow": [21, 50, 100],
     "stop_atr": [1.0, 2.0, 3.0],
@@ -17,6 +18,11 @@ PARAM_GRID = {
 def generate(bars, p):
     if p["fast"] >= p["slow"]:
         return None  # invalid combo, skipped
+    big, ends = to_timeframe(bars, p["tf"])
+    return expand(bars, ends, _signals(big, p))
+
+
+def _signals(bars, p):
     f = ema(bars.close, p["fast"])
     s = ema(bars.close, p["slow"])
     above = f > s

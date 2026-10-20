@@ -50,3 +50,41 @@ def build(bars, long_mask, short_mask, stop_pts, target_pts, force_exit, side: s
     entry[bad] = 0
     tgt[~np.isfinite(tgt)] = 0
     return Signals(entry, stop, tgt, force_exit)
+
+
+def to_timeframe(bars, tf: int):
+    """Combine 1-minute bars into tf-minute bars (never across trading days).
+
+    Returns (bigger bars, ends) where ends[k] is the 1-minute bar index on which bigger bar k closes.
+    A signal on bigger bar k is acted on at the next 1-minute open after ends[k].
+    """
+    if tf <= 1:
+        return bars, np.arange(len(bars))
+    key = bars.day.astype(np.int64) * 1440 + (bars.minute // tf)
+    starts = np.flatnonzero(np.concatenate([[True], key[1:] != key[:-1]]))
+    ends = np.concatenate([starts[1:] - 1, [len(bars) - 1]])
+    big = type(bars)(
+        bars.symbol,
+        bars.ts[ends],
+        bars.open[starts],
+        np.maximum.reduceat(bars.high, starts),
+        np.minimum.reduceat(bars.low, starts),
+        bars.close[ends],
+        np.add.reduceat(bars.volume, starts),
+        bars.minute[ends] + 1,  # time the bigger bar closes (a 9:30-9:34 bar closes at 9:35)
+        bars.day[starts],
+        bars.day_dates,
+    )
+    return big, ends
+
+
+def expand(bars, ends, sig: Signals, force_exit=None) -> Signals:
+    """Map signals made on bigger bars back onto the 1-minute bars the engine trades on."""
+    n = len(bars)
+    entry = np.zeros(n, np.int8)
+    stop = np.zeros(n)
+    tgt = np.zeros(n)
+    entry[ends] = sig.entry
+    stop[ends] = sig.stop_pts
+    tgt[ends] = sig.target_pts
+    return Signals(entry, stop, tgt, default_force_exit(bars) if force_exit is None else force_exit)

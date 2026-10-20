@@ -1,11 +1,12 @@
 import numpy as np
 
 from ..indicators import atr, rsi
-from .base import build, default_force_exit, entry_window
+from .base import build, default_force_exit, entry_window, expand, to_timeframe
 
 NAME = "rsi_reversal"
 DESCRIPTION = "RSI reversal: buy when RSI crosses back up from oversold, short when it crosses down from overbought."
 PARAM_GRID = {
+    "tf": [5, 15, 30],  # chart timeframe in minutes
     "length": [7, 14],
     "level": [20, 25, 30],  # oversold level; overbought is 100 - level
     "stop_atr": [1.0, 2.0, 3.0],
@@ -15,6 +16,11 @@ PARAM_GRID = {
 
 
 def generate(bars, p):
+    big, ends = to_timeframe(bars, p["tf"])
+    return expand(bars, ends, _signals(big, p))
+
+
+def _signals(bars, p):
     r = rsi(bars.close, p["length"])
     lo, hi = p["level"], 100 - p["level"]
     long_m = np.zeros(len(bars), bool)

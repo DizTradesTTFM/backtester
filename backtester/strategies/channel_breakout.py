@@ -1,9 +1,10 @@
 from ..indicators import atr, rolling_max_prev, rolling_min_prev
-from .base import build, default_force_exit, entry_window
+from .base import build, default_force_exit, entry_window, expand, to_timeframe
 
 NAME = "channel_breakout"
 DESCRIPTION = "Channel breakout: buy a close above the highest high of the last N bars, short below the lowest low."
 PARAM_GRID = {
+    "tf": [5, 15, 30],  # chart timeframe in minutes
     "lookback": [20, 45, 90],
     "stop_atr": [1.0, 2.0, 3.0],
     "rr": [1.0, 2.0, 3.0],
@@ -13,6 +14,11 @@ PARAM_GRID = {
 
 
 def generate(bars, p):
+    big, ends = to_timeframe(bars, p["tf"])
+    return expand(bars, ends, _signals(big, p))
+
+
+def _signals(bars, p):
     hi = rolling_max_prev(bars.high, p["lookback"])
     lo = rolling_min_prev(bars.low, p["lookback"])
     window = entry_window(bars, p["start"], p["end"])
