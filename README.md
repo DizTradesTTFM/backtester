@@ -6,7 +6,7 @@ You never edit code. You double-click `.bat` files.
 
 ## One-time setup (Windows)
 
-1. **Install Python 3.12** from https://www.python.org/downloads/windows/ . On the first install screen, tick **"Add python.exe to PATH"**, then click Install Now.
+1. **Install Python 3.12 or 3.13** (not newer: the speed library lags new Python releases) from https://www.python.org/downloads/windows/ . On the first install screen, tick **"Add python.exe to PATH"**, then click Install Now.
 2. **Install GitHub Desktop** from https://desktop.github.com and sign in as your GitHub account.
 3. In GitHub Desktop: **File → Clone repository → backtester → Clone**. Note the folder it saves to (usually `Documents\GitHub\backtester`).
 4. Open that folder and double-click **`install.bat`**. Wait until it says **All set**.
