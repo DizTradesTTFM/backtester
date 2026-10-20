@@ -92,6 +92,7 @@ cols = {
     "instrument": "Contract",
     "strategy": "Strategy",
     "params": "Settings",
+    "contracts": "Contracts",
     "oos_prop_pass_rate": "Prop pass % (unseen)",
     "oos_prop_fail_rate": "Prop blow-up % (unseen)",
     "oos_net_profit": "Profit $ (unseen)",
@@ -99,13 +100,17 @@ cols = {
     "is_net_profit": "Profit $ (training)",
     "is_sharpe": "Sharpe (training)",
     "luck_bar": "Luck bar",
+    "robustness": "Neighbors profitable",
     "stability": "Periods profitable",
+    "oos_long_profit": "Longs $ (unseen)",
+    "oos_short_profit": "Shorts $ (unseen)",
     "is_trades": "Trades",
     "is_max_drawdown": "Max drawdown $",
     "reason": "Why",
 }
 table = (
-    view.sort_values(sort_by, ascending=False, na_position="last")[list(cols)]
+    view.sort_values(sort_by, ascending=False, na_position="last")
+    .reindex(columns=list(cols))
     .head(500)
     .rename(columns=cols)
     .reset_index()
@@ -120,6 +125,9 @@ picked = st.dataframe(
         "Prop pass % (unseen)": st.column_config.NumberColumn(format="percent"),
         "Prop blow-up % (unseen)": st.column_config.NumberColumn(format="percent"),
         "Periods profitable": st.column_config.NumberColumn(format="percent"),
+        "Neighbors profitable": st.column_config.NumberColumn(format="percent"),
+        "Longs $ (unseen)": st.column_config.NumberColumn(format="dollar"),
+        "Shorts $ (unseen)": st.column_config.NumberColumn(format="dollar"),
         "Profit $ (unseen)": st.column_config.NumberColumn(format="dollar"),
         "Profit $ (training)": st.column_config.NumberColumn(format="dollar"),
         "Max drawdown $": st.column_config.NumberColumn(format="dollar"),
@@ -131,7 +139,9 @@ picked = st.dataframe(
 st.caption(
     "**Training** = the older 70% of data the settings were picked on. **Unseen** = the newest 30%, never used for "
     "picking: that's the honest number. **Luck bar** = the Sharpe the best of this many random strategies would hit "
-    "by pure luck; training Sharpe must beat it."
+    "by pure luck; training Sharpe must beat it. **Contracts** = position size with the best prop pass rate in training. "
+    "**Neighbors profitable** = share of settings one notch away that also made money (high = not a fluke). "
+    "Dollar columns are for 1 contract."
 )
 
 # ---- detail ------------------------------------------------------------------
@@ -170,7 +180,8 @@ fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0), showlegend=False
 st.plotly_chart(fig, use_container_width=True)
 
 s1, s2, s3, s4 = st.columns(4)
-s1.metric("Prop pass % (unseen)", f"{row.oos_prop_pass_rate:.0%}" if pd.notna(row.oos_prop_pass_rate) else "n/a")
+size = f"{row.contracts:.0f} contracts" if pd.notna(row.get("contracts")) else "1 contract"
+s1.metric(f"Prop pass % (unseen, {size})", f"{row.oos_prop_pass_rate:.0%}" if pd.notna(row.oos_prop_pass_rate) else "n/a")
 s2.metric("Median days to pass", f"{row.oos_prop_days_to_pass:.0f}" if pd.notna(row.oos_prop_days_to_pass) else "n/a")
 s3.metric("Win rate (training)", f"{row.is_win_rate:.0%}" if pd.notna(row.is_win_rate) else "n/a")
 s4.metric("Avg trade (training)", f"${row.is_avg_trade:,.0f}" if pd.notna(row.is_avg_trade) else "n/a")

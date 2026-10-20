@@ -23,6 +23,7 @@ class PropRules:
     daily_loss_limit: float  # 0 = no daily limit
     max_days: int  # trading days allowed before we call it a timeout
     min_days: int = 1  # minimum trading days before a pass counts
+    max_minis: int = 5  # position limit in full-size contracts (10 micros = 1 mini)
 
     def to_dict(self):
         return asdict(self)

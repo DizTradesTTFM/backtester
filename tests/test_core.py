@@ -129,3 +129,31 @@ def test_timeframe_signals_fire_on_bigger_bar_close():
     sig = mod.generate(bars, {**param_combos(mod)[0], "tf": 15})
     fired = np.flatnonzero(sig.entry)
     assert len(fired) and np.isin(fired, ends).all()
+
+
+def test_best_prop_size_picks_on_training_and_respects_limit():
+    from backtester.evaluate import best_prop_size
+
+    rules = PropRules("t", profit_target=1000, max_loss=500, trailing="eod", daily_loss_limit=0, max_days=10, max_minis=2)
+    # $60/day steady winner: 1 contract times out, bigger sizes pass faster; limit caps minis at 2
+    ins = trades_from(range(40), [60] * 40)
+    oos = trades_from(range(20), [60] * 20)
+    out = best_prop_size(ins, oos, 40, 20, rules, (1, 2, 3, 4), micro=False)
+    assert out["contracts"] == 2 and out["oos_prop_pass_rate"] == 1.0
+    out = best_prop_size(ins, oos, 40, 20, rules, (1, 2, 3, 4), micro=True)
+    assert out["contracts"] == 4
+
+
+def test_runner_end_to_end_with_robustness(tmp_path):
+    from backtester.runner import connect, run
+
+    data = tmp_path / "ES_1m.parquet"
+    make_sample_bars(days=60).to_parquet(data)
+    db = tmp_path / "r.db"
+    run("t", ["ES"], ["orb"], workers=1, data_paths={"ES": data}, db_path=db)
+    rows = connect(db).execute("SELECT metrics, verdict FROM results").fetchall()
+    assert len(rows) == len(param_combos(STRATEGIES["orb"]))
+    import json
+
+    m = json.loads(rows[0][0])
+    assert "robustness" in m and "contracts" in m and "oos_long_profit" in m

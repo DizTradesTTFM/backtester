@@ -37,10 +37,12 @@ Every combo runs on the full history, split into:
 A strategy gets **PASS** only if all of these hold:
 
 1. At least 100 training trades.
-2. Profitable in training, with a Sharpe above the **luck bar** (the Sharpe the best of N random strategies would hit by pure chance; N = how many combos were tested).
-3. Profitable in at least 4 of 6 training periods (not one lucky streak).
-4. Still profitable on unseen data (profit factor 1.1 or better).
-5. Passes the simulated prop evaluation at least 30% of the time on unseen data. If it clears 1-4 but not this, it gets **WATCH**.
+2. Profitable in training, in at least 4 of 6 training periods (not one lucky streak).
+3. Still profitable on unseen data (profit factor 1.1 or better).
+4. Training Sharpe above the **luck bar** (the Sharpe the best of N random strategies would hit by pure chance; N = how many combos were tested). Within 15% of the bar counts as **WATCH** if at least 60% of its neighboring settings (one notch different) were also profitable.
+5. Passes the simulated prop evaluation at least 30% of the time on unseen data, at the contract size that did best in training (sizes 1-10, capped at the firm's position limit). Clearing 1-4 but not this gets **WATCH**.
+
+The dashboard also splits profit into longs vs shorts, so you can spot a strategy that only "works" because the market went up.
 
 The engine is pessimistic on purpose: 1 tick of slippage each way, commissions charged, stops assumed to hit before targets when both are touched in the same bar, targets need price to trade one tick through, everything flat by 3:55 PM New York time.
 

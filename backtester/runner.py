@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 
 from .data import DATA_DIR, load_bars
-from .evaluate import EvalConfig, evaluate
+from .evaluate import SCORING_VERSION, EvalConfig, evaluate, verdict
 from .instruments import get_instrument
 from .prop import PROP_PRESETS
 from .strategies import STRATEGIES, get_strategy, param_combos
@@ -81,7 +81,37 @@ def default_run_name(instruments) -> str:
             st = f.stat()
             h.update(f"{sym}{st.st_size}{st.st_mtime_ns}".encode())
     kind = "SAMPLE" if (DATA_DIR / "SAMPLE_DATA").exists() else "real"
-    return f"{kind}_{h.hexdigest()[:6]}"
+    return f"{kind}_{h.hexdigest()[:6]}_v{SCORING_VERSION}"
+
+
+def finalize(con, run_name, cfg: EvalConfig):
+    """Once a batch is done: score how many neighboring settings also worked, then re-judge every result."""
+    rows = con.execute("SELECT instrument, strategy, params, metrics FROM results WHERE run=?", (run_name,)).fetchall()
+    by_key = {
+        (i, s, p): {k: (np.nan if v is None else v) for k, v in json.loads(m).items()} for i, s, p, m in rows
+    }
+    updates = []
+    for (inst, strat, params), m in by_key.items():
+        p = json.loads(params)
+        neighbors = []
+        for k, vals in get_strategy(strat).PARAM_GRID.items():
+            if p.get(k) not in vals:
+                continue
+            i = vals.index(p[k])
+            for j in (i - 1, i + 1):
+                if 0 <= j < len(vals):
+                    nm = by_key.get((inst, strat, json.dumps({**p, k: vals[j]}, sort_keys=True)))
+                    if nm is not None:
+                        neighbors.append(nm["is_net_profit"] > 0)
+        rob = float(np.mean(neighbors)) if neighbors else None
+        v, why = verdict(m, cfg, m["luck_bar"], rob)
+        m.update(robustness=rob, verdict=v, reason=why)
+        updates.append((json.dumps({k: _clean(x) for k, x in m.items()}), v, why, run_name, inst, strat, params))
+    con.executemany(
+        "UPDATE results SET metrics=?, verdict=?, reason=? WHERE run=? AND instrument=? AND strategy=? AND params=?",
+        updates,
+    )
+    con.commit()
 
 
 def build_jobs(instruments, strategies):
@@ -113,9 +143,16 @@ def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg
     )
     con.commit()
     print(f"Run '{run_name}': {len(jobs)} backtests total, {len(done)} already done, {len(todo)} to go.")
-    if not todo:
-        return
+    if todo:
+        _run_todo(con, run_name, todo, instruments, rules, cfg, n_trials, workers, data_paths)
+    finalize(con, run_name, cfg)
+    con.execute("UPDATE runs SET finished=? WHERE run=?", (datetime.now().isoformat(timespec="seconds"), run_name))
+    con.commit()
+    counts = dict(con.execute("SELECT verdict, COUNT(*) FROM results WHERE run=? GROUP BY verdict", (run_name,)).fetchall())
+    print(f"Done. {counts.get('PASS', 0)} passed every filter, {counts.get('WATCH', 0)} on the watch list. Open the dashboard.")
 
+
+def _run_todo(con, run_name, todo, instruments, rules, cfg, n_trials, workers, data_paths):
     needed = sorted({get_instrument(s).data for s in instruments})
     data_paths = data_paths or {s: None for s in needed}
     workers = workers or max(1, (os.cpu_count() or 2) - 1)
@@ -139,11 +176,7 @@ def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg
                 rate = finished / (time.time() - t0)
                 left = (len(todo) - finished) / rate if rate else 0
                 print(f"  {finished}/{len(todo)} done, {rate:.1f}/sec, ~{left / 60:.0f} min left", flush=True)
-
-    con.execute("UPDATE runs SET finished=? WHERE run=?", (datetime.now().isoformat(timespec="seconds"), run_name))
     con.commit()
-    n_pass = con.execute("SELECT COUNT(*) FROM results WHERE run=? AND verdict='PASS'", (run_name,)).fetchone()[0]
-    print(f"Done. {n_pass} strategies passed every filter. Open the dashboard to see them.")
 
 
 def main():

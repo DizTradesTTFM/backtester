@@ -17,6 +17,10 @@ from .metrics import compute_metrics
 from .prop import PropRules, evaluate_prop
 
 
+# Bump when scoring changes, so the next run starts a fresh batch instead of resuming an old-style one.
+SCORING_VERSION = 2
+
+
 @dataclass(frozen=True)
 class EvalConfig:
     oos_fraction: float = 0.3  # last 30% of days are out-of-sample
@@ -24,6 +28,7 @@ class EvalConfig:
     slippage_ticks: float = 1.0
     qty: int = 1
     min_trades: int = 100  # fewer in-sample trades than this = not enough evidence
+    sizes: tuple = (1, 2, 3, 4, 5, 6, 8, 10)  # contract counts tried for the prop evaluation
 
 
 def subset(trades: Trades, lo_day: int, hi_day: int) -> Trades:
@@ -51,6 +56,43 @@ def luck_bar(n_trials: int, n_days: int) -> float:
     return z * math.sqrt(252 / n_days)
 
 
+def scaled(trades: Trades, qty: int) -> Trades:
+    t = Trades(*(getattr(trades, f) for f in Trades.__dataclass_fields__))
+    t.pnl = trades.pnl * qty
+    t.mae = trades.mae * qty
+    return t
+
+
+def best_prop_size(ins: Trades, oos: Trades, split: int, oos_days: int, rules: PropRules, sizes, micro: bool) -> dict:
+    """Pick the contract count with the best TRAINING pass rate, then report unseen results at that size.
+
+    The size is chosen on training data only, so the unseen pass rate stays honest.
+    """
+    limit = rules.max_minis * (10 if micro else 1)
+    sizes = [q for q in sizes if q <= limit] or [1]
+    def score(p):  # higher pass rate first, then fewer days to pass
+        rate = p["prop_pass_rate"] if p["prop_pass_rate"] == p["prop_pass_rate"] else 0.0
+        days = p["prop_days_to_pass"] if p["prop_days_to_pass"] == p["prop_days_to_pass"] else 1e9
+        return (round(rate, 6), -days)
+
+    best_q, best_p = sizes[0], None
+    for q in sizes:
+        p = evaluate_prop(scaled(ins, q), split, rules)
+        if best_p is None or score(p) > score(best_p):
+            best_q, best_p = q, p
+    out = {f"is_{k}": v for k, v in best_p.items()}
+    out.update({f"oos_{k}": v for k, v in evaluate_prop(scaled(oos, best_q), oos_days, rules).items()})
+    out["contracts"] = best_q
+    return out
+
+
+def side_split(trades: Trades, prefix: str) -> dict:
+    return {
+        f"{prefix}_long_profit": float(trades.pnl[trades.direction > 0].sum()),
+        f"{prefix}_short_profit": float(trades.pnl[trades.direction < 0].sum()),
+    }
+
+
 def evaluate(bars, signals, inst: Instrument, rules: PropRules, cfg: EvalConfig, n_trials: int) -> dict:
     trades = run_backtest(bars, signals, inst, cfg.slippage_ticks, cfg.qty)
     n_days = int(bars.day[-1]) + 1
@@ -65,34 +107,44 @@ def evaluate(bars, signals, inst: Instrument, rules: PropRules, cfg: EvalConfig,
     chunk_pnl = [subset(ins, edges[k], edges[k + 1]).pnl.sum() for k in range(cfg.n_chunks)]
     stability = float(np.mean([p > 0 for p in chunk_pnl]))
 
-    p_in = evaluate_prop(ins, split, rules)
-    p_out = evaluate_prop(oos, n_days - split, rules)
     bar = luck_bar(n_trials, split)
 
     row = {f"is_{k}": v for k, v in m_in.items()}
     row.update({f"oos_{k}": v for k, v in m_out.items()})
-    row.update({f"is_{k}": v for k, v in p_in.items()})
-    row.update({f"oos_{k}": v for k, v in p_out.items()})
+    row.update(best_prop_size(ins, oos, split, n_days - split, rules, cfg.sizes, bool(inst.data_symbol)))
+    row.update(side_split(ins, "is"))
+    row.update(side_split(oos, "oos"))
     row["stability"] = stability
     row["luck_bar"] = bar
     row["verdict"], row["reason"] = verdict(row, cfg, bar)
     return row
 
 
-def verdict(r: dict, cfg: EvalConfig, bar: float) -> tuple[str, str]:
-    """PASS only if the strategy clears every filter. Reasons are in plain English."""
+def verdict(r: dict, cfg: EvalConfig, bar: float, robustness: float | None = None) -> tuple[str, str]:
+    """PASS only if the strategy clears every filter. Reasons are in plain English.
+
+    robustness = share of neighboring settings (one notch different) that were also profitable in training.
+    It is only known once the whole batch has finished, so the runner re-scores everything at the end.
+    """
     if r["is_trades"] < cfg.min_trades:
         return "FAIL", f"too few trades ({r['is_trades']})"
     if r["is_net_profit"] <= 0:
-        return "FAIL", "loses money in-sample"
-    if not (r["is_sharpe"] > bar):
-        return "FAIL", f"in-sample Sharpe {r['is_sharpe']:.2f} below luck bar {bar:.2f}"
+        return "FAIL", "loses money in training"
     if r["stability"] < 4 / 6:
         return "FAIL", f"only profitable in {r['stability']:.0%} of periods"
     if r["oos_trades"] < 20:
-        return "FAIL", "too few out-of-sample trades"
-    if r["oos_net_profit"] <= 0 or r["oos_profit_factor"] < 1.1:
+        return "FAIL", "too few unseen trades"
+    if r["oos_net_profit"] <= 0 or not (r["oos_profit_factor"] >= 1.1):
         return "FAIL", "falls apart on unseen data"
+    near_miss = False
+    if not (r["is_sharpe"] > bar):
+        # Neighboring settings are tested too, so the luck bar overstates luck when a whole area of settings works.
+        if robustness is not None and robustness >= 0.6 and r["is_sharpe"] >= 0.85 * bar:
+            near_miss = True
+        else:
+            return "FAIL", f"training Sharpe {r['is_sharpe']:.2f} below luck bar {bar:.2f}"
     if not (r["oos_prop_pass_rate"] >= 0.3):
-        return "WATCH", "real edge, but weak prop pass rate"
+        return "WATCH", "edge looks real, but weak prop pass rate"
+    if near_miss:
+        return "WATCH", "just under the luck bar, but neighboring settings also work"
     return "PASS", "survived every filter"
