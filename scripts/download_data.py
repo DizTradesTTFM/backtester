@@ -7,7 +7,9 @@ Needs your Databento API key: paste it when asked, or set DATABENTO_API_KEY.
 """
 
 import argparse
+import getpass
 import os
+import warnings
 from datetime import date, timedelta
 
 import databento as db
@@ -26,7 +28,7 @@ def main():
     ap.add_argument("--yes", action="store_true", help="skip the cost confirmation")
     args = ap.parse_args()
 
-    key = os.environ.get("DATABENTO_API_KEY") or input("Paste your Databento API key: ").strip()
+    key = os.environ.get("DATABENTO_API_KEY") or getpass.getpass("Paste your Databento API key (it stays hidden), then press Enter: ").strip()
     client = db.Historical(key)
     symbols = [f"{s.upper()}.v.0" for s in args.symbols]
     query = dict(dataset=DATASET, symbols=symbols, schema="ohlcv-1m", stype_in="continuous", start=args.start, end=args.end)
@@ -39,6 +41,8 @@ def main():
         return
 
     DATA_DIR.mkdir(exist_ok=True)
+    # Databento flags a handful of days with patchy data; harmless for 1-minute bars, so keep the window clean.
+    warnings.filterwarnings("ignore", message=".*reduced quality.*")
     for sym, cont in zip(args.symbols, symbols):
         print(f"Downloading {sym}...")
         store = client.timeseries.get_range(**{**query, "symbols": [cont]})
