@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from statistics import NormalDist
 
 import numpy as np
+from numba import njit
 
 from .engine import Trades, run_backtest
 from .instruments import Instrument
@@ -18,7 +19,7 @@ from .prop import PropRules, evaluate_prop
 
 
 # Bump when scoring changes, so the next run starts a fresh batch instead of resuming an old-style one.
-SCORING_VERSION = 2
+SCORING_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,8 @@ class EvalConfig:
     qty: int = 1
     min_trades: int = 100  # fewer in-sample trades than this = not enough evidence
     sizes: tuple = (1, 2, 3, 4, 5, 6, 8, 10)  # contract counts tried for the prop evaluation
+    loss_stops: tuple = (0, 300, 500, 750)  # stop trading for the day after losing this much ($, 0 = off)
+    profit_locks: tuple = (0, 500, 1000, 1500)  # stop trading for the day after making this much ($, 0 = off)
 
 
 def subset(trades: Trades, lo_day: int, hi_day: int) -> Trades:
@@ -63,26 +66,55 @@ def scaled(trades: Trades, qty: int) -> Trades:
     return t
 
 
-def best_prop_size(ins: Trades, oos: Trades, split: int, oos_days: int, rules: PropRules, sizes, micro: bool) -> dict:
-    """Pick the contract count with the best TRAINING pass rate, then report unseen results at that size.
+@njit(cache=True)
+def _daily_limit_mask(day, pnl, loss_stop, profit_lock):
+    keep = np.ones(len(pnl), np.bool_)
+    cur = -1
+    acc = 0.0
+    for j in range(len(pnl)):
+        if day[j] != cur:
+            cur = day[j]
+            acc = 0.0
+        if (loss_stop > 0 and acc <= -loss_stop) or (profit_lock > 0 and acc >= profit_lock):
+            keep[j] = False
+        else:
+            acc += pnl[j]
+    return keep
 
-    The size is chosen on training data only, so the unseen pass rate stays honest.
+
+def daily_limits(trades: Trades, loss_stop: float, profit_lock: float) -> Trades:
+    """Skip the rest of a day's trades once the day is down loss_stop or up profit_lock dollars."""
+    if loss_stop <= 0 and profit_lock <= 0:
+        return trades
+    m = _daily_limit_mask(trades.day, trades.pnl, float(loss_stop), float(profit_lock))
+    return Trades(*(getattr(trades, f)[m] for f in Trades.__dataclass_fields__))
+
+
+def best_prop_setup(ins: Trades, oos: Trades, split: int, oos_days: int, rules: PropRules, cfg, micro: bool) -> dict:
+    """Pick contract count + daily loss stop + daily profit lock with the best TRAINING pass rate,
+    then report unseen results with that exact setup.
+
+    The setup is chosen on training data only, so the unseen pass rate stays honest.
     """
     limit = rules.max_minis * (10 if micro else 1)
-    sizes = [q for q in sizes if q <= limit] or [1]
+    sizes = [q for q in cfg.sizes if q <= limit] or [1]
     def score(p):  # higher pass rate first, then fewer days to pass
         rate = p["prop_pass_rate"] if p["prop_pass_rate"] == p["prop_pass_rate"] else 0.0
         days = p["prop_days_to_pass"] if p["prop_days_to_pass"] == p["prop_days_to_pass"] else 1e9
         return (round(rate, 6), -days)
 
-    best_q, best_p = sizes[0], None
+    best, best_p = (sizes[0], 0, 0), None
     for q in sizes:
-        p = evaluate_prop(scaled(ins, q), split, rules)
-        if best_p is None or score(p) > score(best_p):
-            best_q, best_p = q, p
+        sized = scaled(ins, q)
+        for ls in cfg.loss_stops:
+            for pl in cfg.profit_locks:
+                p = evaluate_prop(daily_limits(sized, ls, pl), split, rules)
+                if best_p is None or score(p) > score(best_p):
+                    best, best_p = (q, ls, pl), p
+    q, ls, pl = best
     out = {f"is_{k}": v for k, v in best_p.items()}
-    out.update({f"oos_{k}": v for k, v in evaluate_prop(scaled(oos, best_q), oos_days, rules).items()})
-    out["contracts"] = best_q
+    out.update({f"oos_{k}": v for k, v in evaluate_prop(daily_limits(scaled(oos, q), ls, pl), oos_days, rules).items()})
+    out.update(contracts=q, daily_loss_stop=ls, daily_profit_lock=pl)
     return out
 
 
@@ -111,7 +143,7 @@ def evaluate(bars, signals, inst: Instrument, rules: PropRules, cfg: EvalConfig,
 
     row = {f"is_{k}": v for k, v in m_in.items()}
     row.update({f"oos_{k}": v for k, v in m_out.items()})
-    row.update(best_prop_size(ins, oos, split, n_days - split, rules, cfg.sizes, bool(inst.data_symbol)))
+    row.update(best_prop_setup(ins, oos, split, n_days - split, rules, cfg, bool(inst.data_symbol)))
     row.update(side_split(ins, "is"))
     row.update(side_split(oos, "oos"))
     row["stability"] = stability

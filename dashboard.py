@@ -93,6 +93,8 @@ cols = {
     "strategy": "Strategy",
     "params": "Settings",
     "contracts": "Contracts",
+    "daily_loss_stop": "Daily loss stop $",
+    "daily_profit_lock": "Daily profit lock $",
     "oos_prop_pass_rate": "Prop pass % (unseen)",
     "oos_prop_fail_rate": "Prop blow-up % (unseen)",
     "oos_net_profit": "Profit $ (unseen)",
@@ -126,6 +128,8 @@ picked = st.dataframe(
         "Prop blow-up % (unseen)": st.column_config.NumberColumn(format="percent"),
         "Periods profitable": st.column_config.NumberColumn(format="percent"),
         "Neighbors profitable": st.column_config.NumberColumn(format="percent"),
+        "Daily loss stop $": st.column_config.NumberColumn(format="$%d", help="0 = off"),
+        "Daily profit lock $": st.column_config.NumberColumn(format="$%d", help="0 = off"),
         "Longs $ (unseen)": st.column_config.NumberColumn(format="dollar"),
         "Shorts $ (unseen)": st.column_config.NumberColumn(format="dollar"),
         "Profit $ (unseen)": st.column_config.NumberColumn(format="dollar"),
@@ -139,7 +143,8 @@ picked = st.dataframe(
 st.caption(
     "**Training** = the older 70% of data the settings were picked on. **Unseen** = the newest 30%, never used for "
     "picking: that's the honest number. **Luck bar** = the Sharpe the best of this many random strategies would hit "
-    "by pure luck; training Sharpe must beat it. **Contracts** = position size with the best prop pass rate in training. "
+    "by pure luck; training Sharpe must beat it. **Contracts / Daily loss stop / Daily profit lock** = the prop setup with the "
+    "best pass rate in training (stop trading for the day after losing or making that much; 0 = off). "
     "**Neighbors profitable** = share of settings one notch away that also made money (high = not a fluke). "
     "Dollar columns are for 1 contract."
 )
@@ -179,8 +184,15 @@ fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0), showlegend=False
                   xaxis=dict(showgrid=False))
 st.plotly_chart(fig, use_container_width=True)
 
-s1, s2, s3, s4 = st.columns(4)
 size = f"{row.contracts:.0f} contracts" if pd.notna(row.get("contracts")) else "1 contract"
+if pd.notna(row.get("daily_loss_stop")):
+    st.write(
+        f"**Prop setup (picked on training data):** {row.contracts:.0f} contracts, "
+        f"stop for the day after losing \\${row.daily_loss_stop:,.0f}" if row.daily_loss_stop else
+        f"**Prop setup (picked on training data):** {row.contracts:.0f} contracts, no daily loss stop",
+        f"· lock the day after making \\${row.daily_profit_lock:,.0f}" if row.daily_profit_lock else "· no profit lock",
+    )
+s1, s2, s3, s4 = st.columns(4)
 s1.metric(f"Prop pass % (unseen, {size})", f"{row.oos_prop_pass_rate:.0%}" if pd.notna(row.oos_prop_pass_rate) else "n/a")
 s2.metric("Median days to pass", f"{row.oos_prop_days_to_pass:.0f}" if pd.notna(row.oos_prop_days_to_pass) else "n/a")
 s3.metric("Win rate (training)", f"{row.is_win_rate:.0%}" if pd.notna(row.is_win_rate) else "n/a")

@@ -132,15 +132,16 @@ def test_timeframe_signals_fire_on_bigger_bar_close():
 
 
 def test_best_prop_size_picks_on_training_and_respects_limit():
-    from backtester.evaluate import best_prop_size
+    from backtester.evaluate import EvalConfig as EC, best_prop_setup
 
     rules = PropRules("t", profit_target=1000, max_loss=500, trailing="eod", daily_loss_limit=0, max_days=10, max_minis=2)
     # $60/day steady winner: 1 contract times out, bigger sizes pass faster; limit caps minis at 2
     ins = trades_from(range(40), [60] * 40)
     oos = trades_from(range(20), [60] * 20)
-    out = best_prop_size(ins, oos, 40, 20, rules, (1, 2, 3, 4), micro=False)
+    cfg = EC(sizes=(1, 2, 3, 4), loss_stops=(0,), profit_locks=(0,))
+    out = best_prop_setup(ins, oos, 40, 20, rules, cfg, micro=False)
     assert out["contracts"] == 2 and out["oos_prop_pass_rate"] == 1.0
-    out = best_prop_size(ins, oos, 40, 20, rules, (1, 2, 3, 4), micro=True)
+    out = best_prop_setup(ins, oos, 40, 20, rules, cfg, micro=True)
     assert out["contracts"] == 4
 
 
@@ -157,3 +158,25 @@ def test_runner_end_to_end_with_robustness(tmp_path):
 
     m = json.loads(rows[0][0])
     assert "robustness" in m and "contracts" in m and "oos_long_profit" in m
+
+
+def test_daily_limits_skip_rest_of_day():
+    from backtester.evaluate import daily_limits
+
+    t = trades_from([0, 0, 0, 1, 1], [-200, -200, 500, 600, 100])
+    kept = daily_limits(t, loss_stop=300, profit_lock=500)
+    # day 0: -200, -200 (now -400 <= -300) -> third skipped; day 1: +600 >= 500 -> second skipped
+    assert list(kept.pnl) == [-200, -200, 600]
+
+
+def test_daily_limits_can_rescue_prop_eval():
+    from backtester.evaluate import best_prop_setup
+
+    rules = PropRules("t", profit_target=1000, max_loss=1000, trailing="eod", daily_loss_limit=0, max_days=20)
+    # each day: +300 then a -900 trade. Without a profit lock it blows up; locking at +300 passes.
+    days = [d for d in range(60) for _ in range(2)]
+    pnl = [x for _ in range(60) for x in (300, -900)]
+    ins = trades_from(days, pnl)
+    cfg = EvalConfig(sizes=(1,), loss_stops=(0,), profit_locks=(0, 300))
+    out = best_prop_setup(ins, ins, 60, 60, rules, cfg, micro=False)
+    assert out["daily_profit_lock"] == 300 and out["is_prop_pass_rate"] == 1.0

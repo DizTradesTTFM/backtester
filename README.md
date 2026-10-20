@@ -40,7 +40,7 @@ A strategy gets **PASS** only if all of these hold:
 2. Profitable in training, in at least 4 of 6 training periods (not one lucky streak).
 3. Still profitable on unseen data (profit factor 1.1 or better).
 4. Training Sharpe above the **luck bar** (the Sharpe the best of N random strategies would hit by pure chance; N = how many combos were tested). Within 15% of the bar counts as **WATCH** if at least 60% of its neighboring settings (one notch different) were also profitable.
-5. Passes the simulated prop evaluation at least 30% of the time on unseen data, at the contract size that did best in training (sizes 1-10, capped at the firm's position limit). Clearing 1-4 but not this gets **WATCH**.
+5. Passes the simulated prop evaluation at least 30% of the time on unseen data, with the prop setup that did best in training: contract size (1-10, capped at the firm's position limit), a daily loss stop ($0/300/500/750) and a daily profit lock ($0/500/1,000/1,500). Clearing 1-4 but not this gets **WATCH**.
 
 The dashboard also splits profit into longs vs shorts, so you can spot a strategy that only "works" because the market went up.
 
