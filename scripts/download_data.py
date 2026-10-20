@@ -56,6 +56,7 @@ def main():
         path = DATA_DIR / f"{sym.upper()}_1m.parquet"
         out.to_parquet(path)
         print(f"  saved {len(out):,} bars to {path}")
+    (DATA_DIR / "SAMPLE_DATA").unlink(missing_ok=True)
     print("\nDone. Real data is in place; fake sample data (if any) was replaced.")
 
 

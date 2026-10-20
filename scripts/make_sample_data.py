@@ -7,6 +7,7 @@ from backtester.data import DATA_DIR, make_sample_bars
 
 if __name__ == "__main__":
     DATA_DIR.mkdir(exist_ok=True)
+    (DATA_DIR / "SAMPLE_DATA").write_text("Fake data. Delete by running download_data.bat.")
     for sym, seed, price in [("ES", 1, 5000.0), ("NQ", 2, 18000.0)]:
         df = make_sample_bars(days=500, seed=seed, start_price=price)
         if sym == "NQ":

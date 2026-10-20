@@ -8,6 +8,7 @@ running the same command again skips everything already done and continues.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sqlite3
@@ -18,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .data import load_bars
+from .data import DATA_DIR, load_bars
 from .evaluate import EvalConfig, evaluate
 from .instruments import get_instrument
 from .prop import PROP_PRESETS
@@ -69,6 +70,18 @@ def _clean(v):
     if isinstance(v, np.integer):
         return int(v)
     return v
+
+
+def default_run_name(instruments) -> str:
+    """Same data files -> same name, so re-running resumes. New data -> a fresh batch."""
+    h = hashlib.sha1()
+    for sym in sorted({get_instrument(s).data for s in instruments}):
+        f = DATA_DIR / f"{sym}_1m.parquet"
+        if f.exists():
+            st = f.stat()
+            h.update(f"{sym}{st.st_size}{st.st_mtime_ns}".encode())
+    kind = "SAMPLE" if (DATA_DIR / "SAMPLE_DATA").exists() else "real"
+    return f"{kind}_{h.hexdigest()[:6]}"
 
 
 def build_jobs(instruments, strategies):
@@ -135,7 +148,7 @@ def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg
 
 def main():
     ap = argparse.ArgumentParser(description="Run thousands of backtests and save the results.")
-    ap.add_argument("--run", default="main", help="name for this batch. Re-using a name resumes it and skips finished backtests")
+    ap.add_argument("--run", default=None, help="batch name (default: based on the data files). Re-using a name resumes it")
     ap.add_argument("--instruments", nargs="+", default=["ES", "NQ", "MES", "MNQ"])
     ap.add_argument("--strategies", nargs="+", default=["all"])
     ap.add_argument("--prop", default="topstep_50k", choices=sorted(PROP_PRESETS))
@@ -144,7 +157,7 @@ def main():
     args = ap.parse_args()
 
     strategies = sorted(STRATEGIES) if args.strategies == ["all"] else args.strategies
-    run(args.run, args.instruments, strategies, args.prop, args.workers, EvalConfig(slippage_ticks=args.slippage))
+    run(args.run or default_run_name(args.instruments), args.instruments, strategies, args.prop, args.workers, EvalConfig(slippage_ticks=args.slippage))
 
 
 if __name__ == "__main__":
