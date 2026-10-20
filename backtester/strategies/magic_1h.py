@@ -7,8 +7,8 @@ NAME = "magic_1h"
 DESCRIPTION = (
     "Magic Tradez hourly model. A 1H candle (C2) sweeps liquidity and closes back strong: either a prior 1H swing "
     "low/high (ERL) or into an open 1H fair value gap (IRL). Enter at the next 1H open (C3). "
-    "Stop beyond the protected swing (the C2 wick) or, refined, at the C2 body when that body is in the bottom half "
-    "of the move (TTrades stop rules). Optional SMT (the other index did not sweep) and PSP (ES and NQ candles close "
+    "Stop beyond the protected swing (the C2 wick) or, refined, at the candle body when it is beyond 50% of the "
+    "opposing run (TTrades stop rules). Optional SMT (the other index did not sweep) and PSP (ES and NQ candles close "
     "opposite colors). The bubble indicator is private, so the C2 closure stands in for it."
 )
 PARAM_GRID = {
@@ -17,7 +17,7 @@ PARAM_GRID = {
     "hours": ["ny", "london_ny", "all"],
     "smt": [False, True],
     "psp": [False, True],
-    "stop": ["swing", "body"],  # swing = beyond the protected swing (C2 wick); body = refined, at the C2 body
+    "stop": ["swing", "body"],  # swing = beyond the protected swing (C2 wick); body = refined to the candle body if beyond 50% of the opposing run
     "target": ["range", "1R", "2R", "3R"],  # range = highest high of the last N hours
 }
 
@@ -50,7 +50,7 @@ def generate(bars, p):
                 sig &= pl >= np.r_[np.nan, pl[:-1]]  # the other index held its previous 1H low
             if p["psp"]:
                 sig &= pcl < po
-        stop = mm.stop_distance(p["stop"], o, c, l)
+        stop = mm.stop_distance(p["stop"], o, c, l, swing_hi)
         sides.append((sig & np.isfinite(level), stop, mm.r_target(p["target"], stop, swing_hi - c)))
     return mm.finish(bars, ends, h1, sides[0], sides[1], "both")
 

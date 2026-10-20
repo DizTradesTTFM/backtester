@@ -260,10 +260,15 @@ def test_magic_1h_erl_short():
     assert sig.stop_pts[fired[0]] == 7 and sig.target_pts[fired[0]] == 14
 
 
-def test_magic_body_stop_only_when_body_is_low_in_the_move():
+def test_magic_body_stop_needs_body_beyond_half_the_opposing_run():
     from backtester.strategies._magic import stop_distance
 
-    o, c, low = np.array([101.0, 108.0]), np.array([110.0, 110.0]), np.array([100.0, 100.0])
-    assert list(stop_distance("swing", o, c, low)) == [10, 10]
-    # body at 101 is in the bottom half of 100..110 -> refined stop 9; body at 108 is not -> keep the swing stop
-    assert list(stop_distance("body", o, c, low)) == [9, 10]
+    # two setups, each a C1/C2 pair; protected low 100, close 110. Opposing run: high 120 -> low 100, so 50% = 110.
+    o = np.array([115.0, 104.0, 115.0, 112.0])
+    c = np.array([105.0, 110.0, 112.0, 110.0])
+    low = np.full(4, 100.0)
+    assert stop_distance("swing", o, c, low, np.full(4, 120.0))[1] == 10
+    # lowest body at the swing is 104 (C2 open), below the 50% level -> refined stop 6
+    assert stop_distance("body", o, c, low, np.full(4, 120.0))[1] == 6
+    # lowest body 110 is not beyond 50% when the run is only 100..110 (50% = 105) -> keep swing stop 10
+    assert stop_distance("body", o, c, low, np.full(4, 110.0))[3] == 10

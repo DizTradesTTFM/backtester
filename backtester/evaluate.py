@@ -19,7 +19,7 @@ from .prop import PropRules, evaluate_prop
 
 
 # Bump when scoring changes, so the next run starts a fresh batch instead of resuming an old-style one.
-SCORING_VERSION = 4
+SCORING_VERSION = 5
 
 
 @dataclass(frozen=True)
