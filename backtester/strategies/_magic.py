@@ -48,6 +48,22 @@ def flip(c):
     return [(c.open, c.high, c.low, c.close), (-c.open, -c.low, -c.high, -c.close)]
 
 
+def stop_distance(mode, o, c, protected_low):
+    """How far below the C2 close the stop goes (TTrades stop rules, longs; shorts use flipped prices).
+
+    swing: just beyond the protected swing, the low that was swept and closed back above.
+    body:  the refined stop at the C2 candle's body, only when the body sits in the lower half of the run from the
+           protected low to the close. Otherwise the body stop would cut into the real invalidation, so it falls
+           back to the swing stop.
+    """
+    swing = c - protected_low
+    if mode == "swing":
+        return swing
+    body_low = np.minimum(o, c)
+    ok = (body_low <= protected_low + 0.5 * swing) & (body_low < c)
+    return np.where(ok, c - body_low, swing)
+
+
 def r_target(target, stop, range_pts):
     if target == "range":
         return range_pts

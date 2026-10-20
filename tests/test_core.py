@@ -229,7 +229,7 @@ def test_magic_4h1h_long_on_sweep_and_closure(tmp_path, monkeypatch):
     c1 = [(105, 108, 101, 106), (106, 110, 100, 102), (102, 107, 101, 105), (105, 109, 103, 104)]
     c2 = [(103, 105, 98, 104), (104, 112, 104, 111), (111, 111, 110, 110)]
     bars, df = hourly_bars(c1 + c2)
-    p = dict(hours="ny", max_wick=0.25, first_hour=True, smt="none", psp=False, target="range")
+    p = dict(hours="ny", max_wick=0.25, first_hour=True, smt="none", psp=False, stop="swing", target="range")
     sig = STRATEGIES["magic_4h1h"].generate(bars, p)
     fired = np.flatnonzero(sig.entry)
     assert list(fired) == [4 * 60 + 59] and sig.entry[fired[0]] == 1
@@ -253,8 +253,17 @@ def test_magic_1h_erl_short():
     # swing high 110 over the last 3 hours gets swept to 112, candle closes bearish back under: short at next open
     c = [(100, 105, 99, 104), (104, 110, 103, 108), (108, 109, 105, 106), (106, 112, 104, 105), (105, 106, 100, 101)]
     bars, _ = hourly_bars(c, start="2024-01-02 10:00")
-    p = dict(setup="erl", lookback=3, hours="ny", smt=False, psp=False, target="2R")
+    p = dict(setup="erl", lookback=3, hours="ny", smt=False, psp=False, stop="swing", target="2R")
     sig = STRATEGIES["magic_1h"].generate(bars, p)
     fired = np.flatnonzero(sig.entry)
     assert list(fired) == [3 * 60 + 59] and sig.entry[fired[0]] == -1
     assert sig.stop_pts[fired[0]] == 7 and sig.target_pts[fired[0]] == 14
+
+
+def test_magic_body_stop_only_when_body_is_low_in_the_move():
+    from backtester.strategies._magic import stop_distance
+
+    o, c, low = np.array([101.0, 108.0]), np.array([110.0, 110.0]), np.array([100.0, 100.0])
+    assert list(stop_distance("swing", o, c, low)) == [10, 10]
+    # body at 101 is in the bottom half of 100..110 -> refined stop 9; body at 108 is not -> keep the swing stop
+    assert list(stop_distance("body", o, c, low)) == [9, 10]

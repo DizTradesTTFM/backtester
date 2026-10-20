@@ -7,7 +7,7 @@ NAME = "magic_4h1h"
 DESCRIPTION = (
     "Magic Tradez 4H + 1H model. A 4H candle (C2) sweeps the previous 4H candle's low/high with a small wick, "
     "then a 1H candle inside that 4H window closes strong back inside the range (1H C2 closure). Enter at the "
-    "next 1H open (C3). Stop beyond the sweep. Optional SMT (ES vs NQ: only one of them swept) and PSP (ES and NQ "
+    "next 1H open (C3). Stop beyond the protected swing (the sweep low/high) or, refined, at the C2 body when that body is in the bottom half of the move (TTrades stop rules). Optional SMT (ES vs NQ: only one of them swept) and PSP (ES and NQ "
     "1H candles close opposite colors). The bubble indicator is private, so the C2 closure stands in for it."
 )
 PARAM_GRID = {
@@ -16,6 +16,7 @@ PARAM_GRID = {
     "first_hour": [True, False],  # True = only the first 1H candle of the 4H window counts; False = first 3
     "smt": ["none", "4h", "4h+1h"],
     "psp": [False, True],
+    "stop": ["swing", "body"],  # swing = beyond the protected swing (C2 wick); body = refined, at the C2 body
     "target": ["range", "1R", "2R", "3R"],  # range = other end of the previous 4H candle
 }
 
@@ -62,7 +63,7 @@ def generate(bars, p):
             if p["psp"]:
                 sig &= pcl < po  # the other index's 1H candle closed the opposite color
         sig = _first_per_window(sig, gid)
-        stop = c - low_so_far
+        stop = mm.stop_distance(p["stop"], o, c, low_so_far)
         sides.append((sig, stop, mm.r_target(p["target"], stop, prev_hi - c)))
     return mm.finish(bars, ends, h1, sides[0], sides[1], "both")
 
