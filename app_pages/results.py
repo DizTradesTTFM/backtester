@@ -1,4 +1,4 @@
-"""Results dashboard. Start it with dashboard.bat (or: streamlit run dashboard.py)."""
+"""Results page: leaderboard, equity curves and trades for each batch."""
 
 import json
 import sqlite3
@@ -14,8 +14,6 @@ from backtester.evaluate import EvalConfig
 from backtester.instruments import get_instrument
 from backtester.runner import RESULTS_DB
 from backtester.strategies import STRATEGIES
-
-st.set_page_config(page_title="Backtester", layout="wide")
 
 LINE = "#2a78d6"
 SPLIT = "#8a8f98"
@@ -45,9 +43,9 @@ def bars_for(symbol):
 
 
 runs = load_runs()
-st.title("Backtester results")
+st.title("Results")
 if runs.empty:
-    st.info("No results yet. Run run_overnight.bat first.")
+    st.info("No results yet. Go to **Run** and press Start.")
     st.stop()
 
 run = st.selectbox("Batch", runs["run"], format_func=lambda r: f"{r}  ({runs.set_index('run').loc[r, 'started']})")

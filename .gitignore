@@ -4,3 +4,6 @@ __pycache__/
 data/
 results/
 .pytest_cache/
+my_strategies/
+.installed_version
+.installed_files

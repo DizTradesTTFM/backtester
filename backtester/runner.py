@@ -149,7 +149,7 @@ def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg
     con.execute("UPDATE runs SET finished=? WHERE run=?", (datetime.now().isoformat(timespec="seconds"), run_name))
     con.commit()
     counts = dict(con.execute("SELECT verdict, COUNT(*) FROM results WHERE run=? GROUP BY verdict", (run_name,)).fetchall())
-    print(f"Done. {counts.get('PASS', 0)} passed every filter, {counts.get('WATCH', 0)} on the watch list. Open the dashboard.")
+    print(f"Done. {counts.get('PASS', 0)} passed every filter, {counts.get('WATCH', 0)} on the watch list. See the Results page.")
 
 
 def _run_todo(con, run_name, todo, instruments, rules, cfg, n_trials, workers, data_paths):
@@ -190,7 +190,8 @@ def main():
     args = ap.parse_args()
 
     strategies = sorted(STRATEGIES) if args.strategies == ["all"] else args.strategies
-    run(args.run or default_run_name(args.instruments), args.instruments, strategies, args.prop, args.workers, EvalConfig(slippage_ticks=args.slippage))
+    name = args.run or default_run_name(args.instruments) + ("" if args.prop == "topstep_50k" else f"_{args.prop}")
+    run(name, args.instruments, strategies, args.prop, args.workers, EvalConfig(slippage_ticks=args.slippage))
 
 
 if __name__ == "__main__":

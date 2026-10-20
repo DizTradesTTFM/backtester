@@ -180,3 +180,30 @@ def test_daily_limits_can_rescue_prop_eval():
     cfg = EvalConfig(sizes=(1,), loss_stops=(0,), profit_locks=(0, 300))
     out = best_prop_setup(ins, ins, 60, 60, rules, cfg, micro=False)
     assert out["daily_profit_lock"] == 300 and out["is_prop_pass_rate"] == 1.0
+
+
+def test_background_job_start_watch_stop(tmp_path, monkeypatch):
+    import time
+
+    from backtester import jobs
+
+    monkeypatch.setattr(jobs, "JOB_DIR", tmp_path)
+    jobs.start("t", ["-c", "import time; print('hello', flush=True); time.sleep(30)"])
+    for _ in range(50):
+        if "hello" in jobs.log_tail("t"):
+            break
+        time.sleep(0.1)
+    assert jobs.running("t") and "hello" in jobs.log_tail("t")
+    jobs.stop("t")
+    time.sleep(0.3)
+    assert not jobs.running("t")
+
+
+def test_download_plan_only_fetches_new_days(tmp_path, monkeypatch):
+    import scripts.download_data as dl
+
+    monkeypatch.setattr(dl, "DATA_DIR", tmp_path)
+    assert dl.plan(["ES"], end="2024-03-01", update=True) == [("ES", dl.FIRST_DAY, "2024-03-01")]
+    pd.DataFrame({"ts": pd.to_datetime(["2024-02-10 15:00"], utc=True)}).to_parquet(tmp_path / "ES_1m.parquet")
+    assert dl.plan(["ES"], end="2024-03-01", update=True) == [("ES", "2024-02-11", "2024-03-01")]
+    assert dl.plan(["ES"], end="2024-02-11", update=True) == []

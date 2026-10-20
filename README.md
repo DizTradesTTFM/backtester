@@ -1,59 +1,37 @@
 # Backtester
 
-Tests thousands of intraday futures strategies (ES, NQ, MES, MNQ) on 1-minute data, throws out the ones that only worked by luck, and ranks the survivors by how likely they are to **pass and keep a prop firm account**.
+An app that tests thousands of intraday futures strategies (ES, NQ, MES, MNQ) on 1-minute data, throws out the ones that only worked by luck, and ranks the survivors by how likely they are to **pass and keep a prop firm account**.
 
-You never edit code. You double-click `.bat` files.
+## Setup (once, Windows)
 
-## One-time setup (Windows)
+1. **Install Python 3.12 or 3.13** (not newer) from https://www.python.org/downloads/windows/ . On the first screen tick **"Add python.exe to PATH"**.
+2. Get this folder onto your PC (GitHub Desktop clone, or Code → Download ZIP and unzip). Don't put it inside OneDrive.
+3. Double-click **`install.bat`**. It sets everything up, puts a **Backtester** icon on your desktop and opens the app.
 
-1. **Install Python 3.12 or 3.13** (not newer: the speed library lags new Python releases) from https://www.python.org/downloads/windows/ . On the first install screen, tick **"Add python.exe to PATH"**, then click Install Now.
-2. **Install GitHub Desktop** from https://desktop.github.com and sign in as your GitHub account.
-3. In GitHub Desktop: **File → Clone repository → backtester → Clone**. Note the folder it saves to (usually `Documents\GitHub\backtester`).
-4. Open that folder and double-click **`install.bat`**. Wait until it says **All set**.
+## Using it
 
-## Every time
+Double-click the **Backtester** icon. It updates itself, then opens in your browser. A small minimized window keeps it running; close that window to close the app.
 
-| Double-click | What it does |
+| Page | What it's for |
 |---|---|
-| `make_sample_data.bat` | Writes FAKE data so you can try everything. Results on it mean nothing. |
-| `download_data.bat` | Buys and downloads real ES/NQ data from Databento. Shows the price first and asks before charging. |
-| `run_overnight.bat` | Runs every backtest using all but one CPU core. Close the window to stop; double-click again to resume where it left off. |
-| `dashboard.bat` | Opens the results in your browser. |
-| `schedule_nightly.bat` | Makes Windows start the run every night at 11 PM automatically. |
+| **Results** | Leaderboard, equity curves and trades for every batch |
+| **Run** | Pick contracts and strategies, press Start, watch the progress bar. Optional nightly schedule |
+| **Strategies** | Every strategy in plain English and the settings it tries |
+| **Data** | What price data you have, and a button to buy only the new days from Databento |
 
-**Getting updates:** open GitHub Desktop and click **Fetch origin**, then **Pull**. Your data and results are kept. If an update adds new packages, run `install.bat` again.
-
-**Leave the PC on overnight:** Settings → System → Power → set "Sleep" to **Never** when plugged in.
+To add a strategy, describe it to Claude in words (entry, stop, target, hours). It appears in the app the next time you open it.
 
 ## How a strategy is judged
 
-The data is 1-minute bars, but most strategies read their signals off 5, 15 or 30-minute charts built from it (the `tf` setting). Fills and stops are still checked minute by minute, so the test sees what happened inside each bigger bar.
+Data is 1-minute bars; most strategies read signals off 5, 15 or 30-minute charts built from it. Fills and stops are still checked minute by minute.
 
-Every combo runs on the full history, split into:
+Every combo runs on the full history, split into **training** (older 70%, used to rank) and **unseen** (newest 30%, never used for picking: the honest test). **PASS** needs all of:
 
-- **Training (older 70%)**: used to rank.
-- **Unseen (newest 30%)**: never used for picking. This is the honest test.
+1. At least 100 training trades, profitable in at least 4 of 6 training periods.
+2. Still profitable on unseen data (profit factor 1.1 or better).
+3. Training Sharpe above the **luck bar** (what the best of N random strategies would hit by chance). Within 15% of it counts as **WATCH** if 60%+ of neighboring settings also made money.
+4. Passes the simulated prop evaluation 30%+ of the time on unseen data, with the setup that did best in training: contract size (1-10, within the firm's limit), daily loss stop, daily profit lock. Clearing 1-3 but not this gets **WATCH**.
 
-A strategy gets **PASS** only if all of these hold:
+The engine is pessimistic: 1 tick slippage each way, commissions, stop assumed hit before target in the same bar, targets must trade one tick through, flat by 3:55 PM New York.
 
-1. At least 100 training trades.
-2. Profitable in training, in at least 4 of 6 training periods (not one lucky streak).
-3. Still profitable on unseen data (profit factor 1.1 or better).
-4. Training Sharpe above the **luck bar** (the Sharpe the best of N random strategies would hit by pure chance; N = how many combos were tested). Within 15% of the bar counts as **WATCH** if at least 60% of its neighboring settings (one notch different) were also profitable.
-5. Passes the simulated prop evaluation at least 30% of the time on unseen data, with the prop setup that did best in training: contract size (1-10, capped at the firm's position limit), a daily loss stop ($0/300/500/750) and a daily profit lock ($0/500/1,000/1,500). Clearing 1-4 but not this gets **WATCH**.
-
-The dashboard also splits profit into longs vs shorts, so you can spot a strategy that only "works" because the market went up.
-
-The engine is pessimistic on purpose: 1 tick of slippage each way, commissions charged, stops assumed to hit before targets when both are touched in the same bar, targets need price to trade one tick through, everything flat by 3:55 PM New York time.
-
-**Prop rules** default to an approximation of a Topstep 50K evaluation ($3,000 target, $2,000 end-of-day trailing max loss, $1,000 daily loss limit). Verify against the firm's current rules before trusting pass rates. They live in `backtester/prop.py`.
-
-## Folder map
-
-- `backtester/engine.py`: trade simulator
-- `backtester/prop.py`: prop evaluation simulator and rule presets
-- `backtester/evaluate.py`: training/unseen split, stability, luck bar, verdicts
-- `backtester/strategies/`: strategy templates and the settings each one tries
-- `backtester/runner.py`: overnight batch runner (results go to `results/results.db`)
-- `dashboard.py`: results dashboard
-- `scripts/`: data download and fake sample data
+**Prop rules** default to an approximation of a Topstep 50K evaluation. Verify against the firm's current rules. They live in `backtester/prop.py`.
