@@ -52,18 +52,27 @@ def build(bars, long_mask, short_mask, stop_pts, target_pts, force_exit, side: s
     return Signals(entry, stop, tgt, force_exit)
 
 
+SESSION_START = 18 * 60  # CME equity futures sessions open at 18:00 New York
+
+
 def to_timeframe(bars, tf: int):
     """Combine 1-minute bars into tf-minute bars (never across trading days).
 
+    Bars are counted from the 18:00 session open, so 4-hour candles are 18-22, 22-02, 02-06, 06-10, 10-14, 14-18.
     Returns (bigger bars, ends) where ends[k] is the 1-minute bar index on which bigger bar k closes.
     A signal on bigger bar k is acted on at the next 1-minute open after ends[k].
     """
     if tf <= 1:
         return bars, np.arange(len(bars))
-    key = bars.day.astype(np.int64) * 1440 + (bars.minute // tf)
+    key = bars.day.astype(np.int64) * 1440 + ((bars.minute - SESSION_START) % 1440) // tf
     starts = np.flatnonzero(np.concatenate([[True], key[1:] != key[:-1]]))
     ends = np.concatenate([starts[1:] - 1, [len(bars) - 1]])
-    big = type(bars)(
+    return aggregate(bars, starts, ends), ends
+
+
+def aggregate(bars, starts, ends):
+    """Bigger bars from 1-minute bars, given where each bigger bar starts and ends."""
+    return type(bars)(
         bars.symbol,
         bars.ts[ends],
         bars.open[starts],
@@ -75,7 +84,6 @@ def to_timeframe(bars, tf: int):
         bars.day[starts],
         bars.day_dates,
     )
-    return big, ends
 
 
 def expand(bars, ends, sig: Signals, force_exit=None) -> Signals:

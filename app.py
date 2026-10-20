@@ -2,13 +2,17 @@
 
 import streamlit as st
 
-st.set_page_config(page_title="Backtester", layout="wide")
+from app_pages.ui import style
+
+st.set_page_config(page_title="Backtester", page_icon="📈", layout="wide")
+style()
 
 st.navigation(
     [
-        st.Page("app_pages/results.py", title="Results", icon="📊", default=True),
-        st.Page("app_pages/run.py", title="Run", icon="▶️"),
-        st.Page("app_pages/strategies.py", title="Strategies", icon="🧠"),
-        st.Page("app_pages/data.py", title="Data", icon="💾"),
-    ]
+        st.Page("app_pages/results.py", title="Results", default=True),
+        st.Page("app_pages/run.py", title="Run"),
+        st.Page("app_pages/strategies.py", title="Strategies"),
+        st.Page("app_pages/data.py", title="Data"),
+    ],
+    position="top",
 ).run()

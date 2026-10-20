@@ -141,6 +141,7 @@ def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg
         "INSERT OR IGNORE INTO runs (run, started, config, n_jobs) VALUES (?, ?, ?, ?)",
         (run_name, datetime.now().isoformat(timespec="seconds"), json.dumps(config), len(jobs)),
     )
+    con.execute("UPDATE runs SET config=?, n_jobs=? WHERE run=?", (json.dumps(config), len(jobs), run_name))
     con.commit()
     print(f"Run '{run_name}': {len(jobs)} backtests total, {len(done)} already done, {len(todo)} to go.")
     if todo:
@@ -191,6 +192,8 @@ def main():
 
     strategies = sorted(STRATEGIES) if args.strategies == ["all"] else args.strategies
     name = args.run or default_run_name(args.instruments) + ("" if args.prop == "topstep_50k" else f"_{args.prop}")
+    if not args.run and set(strategies) != set(STRATEGIES):
+        name += "_" + "+".join(sorted(strategies))  # its own batch, so the luck bar matches what was tested
     run(name, args.instruments, strategies, args.prop, args.workers, EvalConfig(slippage_ticks=args.slippage))
 
 

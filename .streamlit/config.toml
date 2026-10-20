@@ -1,0 +1,25 @@
+# Look of the app: matches the BmT Journal (near-black, Geist + JetBrains Mono, blue/amber/pink/green accents)
+[theme]
+base = "dark"
+primaryColor = "#4aa3ff"
+backgroundColor = "#0a0a0b"
+secondaryBackgroundColor = "#101012"
+textColor = "#f2f2f3"
+borderColor = "#26262b"
+dataframeBorderColor = "#202024"
+dataframeHeaderBackgroundColor = "#0e0e10"
+linkColor = "#4aa3ff"
+font = "Geist:https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap"
+codeBackgroundColor = "#0e0e10"
+baseRadius = "10px"
+buttonRadius = "full"
+showWidgetBorder = true
+greenColor = "#3ddc84"
+redColor = "#ff5c8a"
+orangeColor = "#ffb020"
+blueColor = "#4aa3ff"
+chartCategoricalColors = ["#4aa3ff", "#ffb020", "#ff5c8a", "#3ddc84", "#b4b4bc"]
+
+[client]
+toolbarMode = "minimal"

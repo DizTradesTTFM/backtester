@@ -1,5 +1,6 @@
 """Results page: leaderboard, equity curves and trades for each batch."""
 
+import html
 import json
 import sqlite3
 
@@ -14,9 +15,7 @@ from backtester.evaluate import EvalConfig
 from backtester.instruments import get_instrument
 from backtester.runner import RESULTS_DB
 from backtester.strategies import STRATEGIES
-
-LINE = "#2a78d6"
-SPLIT = "#8a8f98"
+from app_pages import ui
 
 
 @st.cache_data(ttl=60)
@@ -43,7 +42,7 @@ def bars_for(symbol):
 
 
 runs = load_runs()
-st.title("Results")
+ui.header("Results", "Test → Filter → Fund", [("✓ Pass", ui.GREEN), ("◎ Watch", ui.AMBER), ("✕ Fail", ui.PINK)])
 if runs.empty:
     st.info("No results yet. Go to **Run** and press Start.")
     st.stop()
@@ -57,11 +56,12 @@ if df.empty:
     st.stop()
 
 done = len(df)
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Backtests finished", f"{done:,} / {int(run_info['n_jobs']):,}")
-c2.metric("✅ Passed every filter", int((df.verdict == "PASS").sum()))
-c3.metric("👀 Watch list", int((df.verdict == "WATCH").sum()))
-c4.metric("❌ Failed", int((df.verdict == "FAIL").sum()))
+ui.stats([
+    ("Backtests finished", f"{done:,}", f"of {int(run_info['n_jobs']):,}", None),
+    ("Passed every filter", int((df.verdict == "PASS").sum()), "ready to try on a prop account", ui.GREEN),
+    ("Watch list", int((df.verdict == "WATCH").sum()), "close, needs a second look", ui.AMBER),
+    ("Failed", f"{int((df.verdict == 'FAIL').sum()):,}", "luck, losses or blow-ups", ui.PINK),
+])
 st.caption(
     f"Prop rules: {config['prop']['name']} · target \\${config['prop']['profit_target']:,.0f}, "
     f"max loss \\${config['prop']['max_loss']:,.0f} ({config['prop']['trailing']} trailing), "
@@ -70,21 +70,9 @@ st.caption(
 
 with st.expander("Why strategies failed"):
     reasons = df.loc[df.verdict == "FAIL", "reason"].str.replace(r"\s*\(.*|\s[\d.]+.*", "", regex=True)
-    st.bar_chart(reasons.value_counts(), horizontal=True, color=LINE)
+    st.bar_chart(reasons.value_counts(), horizontal=True, color=ui.BLUE)
 
 # ---- leaderboard -------------------------------------------------------------
-st.subheader("Leaderboard")
-f1, f2, f3 = st.columns(3)
-verdicts = f1.multiselect("Verdict", ["PASS", "WATCH", "FAIL"], default=["PASS", "WATCH"])
-insts = f2.multiselect("Contract", sorted(df.instrument.unique()), default=sorted(df.instrument.unique()))
-strats = f3.multiselect("Strategy", sorted(df.strategy.unique()), default=sorted(df.strategy.unique()))
-view = df[df.verdict.isin(verdicts) & df.instrument.isin(insts) & df.strategy.isin(strats)]
-sort_by = ["oos_prop_pass_rate", "is_sharpe"]
-if view.empty and verdicts == ["PASS", "WATCH"]:
-    st.info("Nothing survived the filters in this batch. Showing the closest failures (best training Sharpe).")
-    view = df[df.instrument.isin(insts) & df.strategy.isin(strats)]
-    sort_by = ["is_sharpe"]
-
 cols = {
     "verdict": "Verdict",
     "instrument": "Contract",
@@ -108,49 +96,62 @@ cols = {
     "is_max_drawdown": "Max drawdown $",
     "reason": "Why",
 }
-table = (
-    view.sort_values(sort_by, ascending=False, na_position="last")
-    .reindex(columns=list(cols))
-    .head(500)
-    .rename(columns=cols)
-    .reset_index()
-)
-picked = st.dataframe(
-    table.drop(columns="index"),
-    hide_index=True,
-    use_container_width=True,
-    on_select="rerun",
-    selection_mode="single-row",
-    column_config={
-        "Prop pass % (unseen)": st.column_config.NumberColumn(format="percent"),
-        "Prop blow-up % (unseen)": st.column_config.NumberColumn(format="percent"),
-        "Periods profitable": st.column_config.NumberColumn(format="percent"),
-        "Neighbors profitable": st.column_config.NumberColumn(format="percent"),
-        "Daily loss stop $": st.column_config.NumberColumn(format="$%d", help="0 = off"),
-        "Daily profit lock $": st.column_config.NumberColumn(format="$%d", help="0 = off"),
-        "Longs $ (unseen)": st.column_config.NumberColumn(format="dollar"),
-        "Shorts $ (unseen)": st.column_config.NumberColumn(format="dollar"),
-        "Profit $ (unseen)": st.column_config.NumberColumn(format="dollar"),
-        "Profit $ (training)": st.column_config.NumberColumn(format="dollar"),
-        "Max drawdown $": st.column_config.NumberColumn(format="dollar"),
-        "Sharpe (training)": st.column_config.NumberColumn(format="%.2f"),
-        "Luck bar": st.column_config.NumberColumn(format="%.2f"),
-        "Profit factor (unseen)": st.column_config.NumberColumn(format="%.2f"),
-    },
-)
-st.caption(
-    "**Training** = the older 70% of data the settings were picked on. **Unseen** = the newest 30%, never used for "
-    "picking: that's the honest number. **Luck bar** = the Sharpe the best of this many random strategies would hit "
-    "by pure luck; training Sharpe must beat it. **Contracts / Daily loss stop / Daily profit lock** = the prop setup with the "
-    "best pass rate in training (stop trading for the day after losing or making that much; 0 = off). "
-    "**Neighbors profitable** = share of settings one notch away that also made money (high = not a fluke). "
-    "Dollar columns are for 1 contract."
-)
+with ui.card("Leaderboard", "01 · Best first", ui.BLUE):
+    f1, f2, f3 = st.columns(3)
+    verdicts = f1.multiselect("Verdict", ["PASS", "WATCH", "FAIL"], default=["PASS", "WATCH"])
+    insts = f2.multiselect("Contract", sorted(df.instrument.unique()), default=sorted(df.instrument.unique()))
+    strats = f3.multiselect("Strategy", sorted(df.strategy.unique()), default=sorted(df.strategy.unique()))
+    view = df[df.verdict.isin(verdicts) & df.instrument.isin(insts) & df.strategy.isin(strats)]
+    sort_by = ["oos_prop_pass_rate", "is_sharpe"]
+    if view.empty and verdicts == ["PASS", "WATCH"]:
+        st.info("Nothing survived the filters in this batch. Showing the closest failures (best training Sharpe).")
+        view = df[df.instrument.isin(insts) & df.strategy.isin(strats)]
+        sort_by = ["is_sharpe"]
+
+    table = (
+        view.sort_values(sort_by, ascending=False, na_position="last")
+        .reindex(columns=list(cols))
+        .head(500)
+        .rename(columns=cols)
+        .reset_index()
+    )
+    shown = table.drop(columns="index")
+    picked = st.dataframe(
+        shown.style.map(lambda v: f"color: {ui.VERDICT_COLORS.get(v, ui.TEXT)}; font-weight: 600", subset=["Verdict"]),
+        hide_index=True,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        column_config={
+            "Prop pass % (unseen)": st.column_config.NumberColumn(format="percent"),
+            "Prop blow-up % (unseen)": st.column_config.NumberColumn(format="percent"),
+            "Periods profitable": st.column_config.NumberColumn(format="percent"),
+            "Neighbors profitable": st.column_config.NumberColumn(format="percent"),
+            "Daily loss stop $": st.column_config.NumberColumn(format="$%d", help="0 = off"),
+            "Daily profit lock $": st.column_config.NumberColumn(format="$%d", help="0 = off"),
+            "Longs $ (unseen)": st.column_config.NumberColumn(format="dollar"),
+            "Shorts $ (unseen)": st.column_config.NumberColumn(format="dollar"),
+            "Profit $ (unseen)": st.column_config.NumberColumn(format="dollar"),
+            "Profit $ (training)": st.column_config.NumberColumn(format="dollar"),
+            "Max drawdown $": st.column_config.NumberColumn(format="dollar"),
+            "Sharpe (training)": st.column_config.NumberColumn(format="%.2f"),
+            "Luck bar": st.column_config.NumberColumn(format="%.2f"),
+            "Profit factor (unseen)": st.column_config.NumberColumn(format="%.2f"),
+        },
+    )
+    st.caption(
+        "**Training** = the older 70% of data the settings were picked on. **Unseen** = the newest 30%, never used for "
+        "picking: that's the honest number. **Luck bar** = the Sharpe the best of this many random strategies would hit "
+        "by pure luck; training Sharpe must beat it. **Contracts / Daily loss stop / Daily profit lock** = the prop setup "
+        "with the best pass rate in training (stop trading for the day after losing or making that much; 0 = off). "
+        "**Neighbors profitable** = share of settings one notch away that also made money (high = not a fluke). "
+        "Dollar columns are for 1 contract."
+    )
 
 # ---- detail ------------------------------------------------------------------
 rows = picked.selection.rows if picked and picked.selection else []
 if not rows:
-    st.info("Click a row to see its equity curve and trades.")
+    st.info("Click a row in the leaderboard to see its equity curve and trades.")
     st.stop()
 
 row = view.loc[table.loc[rows[0], "index"]]
@@ -161,52 +162,58 @@ sig = STRATEGIES[row.strategy].generate(bars, params)
 cfg = EvalConfig(**config["eval"])
 trades = run_backtest(bars, sig, inst, cfg.slippage_ticks, cfg.qty)
 
-st.subheader(f"{row.verdict} · {row.instrument} · {row.strategy}")
-st.write(STRATEGIES[row.strategy].DESCRIPTION)
-st.code(json.dumps(params, indent=2), language="json")
-
 n_days = int(bars.day[-1]) + 1
 split_day = int(n_days * (1 - cfg.oos_fraction))
 when = bars.ts[trades.exit_i].tz_localize(None)
 equity = np.cumsum(trades.pnl)
 split_ts = pd.Timestamp(bars.day_dates[split_day])
 
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=when, y=equity, mode="lines", line=dict(color=LINE, width=2), name="Equity",
-                         hovertemplate="%{x|%b %d %Y %H:%M}<br>$%{y:,.0f}<extra></extra>"))
-fig.add_vline(x=split_ts, line=dict(color=SPLIT, width=1, dash="dot"))
-fig.add_vrect(x0=split_ts, x1=when.max() if len(when) else split_ts, fillcolor=SPLIT, opacity=0.08, line_width=0)
-fig.add_annotation(x=split_ts, y=1, yref="paper", text="unseen data →", showarrow=False, xanchor="left", yanchor="bottom")
-fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0), showlegend=False, hovermode="x unified",
-                  yaxis=dict(title="Profit $ (1 contract)", tickprefix="$", gridcolor="rgba(128,128,128,0.15)"),
-                  xaxis=dict(showgrid=False))
-st.plotly_chart(fig, use_container_width=True)
+color = ui.VERDICT_COLORS.get(row.verdict, ui.BLUE)
+with ui.card(f"{row.instrument} · {row.strategy}", f"02 · {row.verdict}", color, key="detail"):
+    ui.rows([
+        ("What it does", STRATEGIES[row.strategy].DESCRIPTION),
+        ("Settings", " · ".join(f"<span class='mono'>{k}</span> {v}" for k, v in params.items())),
+        ("Verdict", f"<span style='color:{color}'>{row.verdict}</span> <span class='bt-muted'>{html.escape(str(row.reason))}</span>"),
+    ])
 
-size = f"{row.contracts:.0f} contracts" if pd.notna(row.get("contracts")) else "1 contract"
-if pd.notna(row.get("daily_loss_stop")):
-    st.write(
-        f"**Prop setup (picked on training data):** {row.contracts:.0f} contracts, "
-        f"stop for the day after losing \\${row.daily_loss_stop:,.0f}" if row.daily_loss_stop else
-        f"**Prop setup (picked on training data):** {row.contracts:.0f} contracts, no daily loss stop",
-        f"· lock the day after making \\${row.daily_profit_lock:,.0f}" if row.daily_profit_lock else "· no profit lock",
-    )
-s1, s2, s3, s4 = st.columns(4)
-s1.metric(f"Prop pass % (unseen, {size})", f"{row.oos_prop_pass_rate:.0%}" if pd.notna(row.oos_prop_pass_rate) else "n/a")
-s2.metric("Median days to pass", f"{row.oos_prop_days_to_pass:.0f}" if pd.notna(row.oos_prop_days_to_pass) else "n/a")
-s3.metric("Win rate (training)", f"{row.is_win_rate:.0%}" if pd.notna(row.is_win_rate) else "n/a")
-s4.metric("Avg trade (training)", f"${row.is_avg_trade:,.0f}" if pd.notna(row.is_avg_trade) else "n/a")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=when, y=equity, mode="lines", line=dict(color=ui.BLUE, width=2), name="Equity",
+                             hovertemplate="%{x|%b %d %Y %H:%M}<br>$%{y:,.0f}<extra></extra>"))
+    fig.add_vline(x=split_ts, line=dict(color=ui.MUTED, width=1, dash="dot"))
+    fig.add_vrect(x0=split_ts, x1=when.max() if len(when) else split_ts, fillcolor=ui.AMBER, opacity=0.06, line_width=0)
+    fig.add_annotation(x=split_ts, y=1, yref="paper", text="unseen data →", showarrow=False, xanchor="left",
+                       yanchor="bottom", font=dict(color=ui.AMBER, family="JetBrains Mono"))
+    ui.plot_layout(fig)
+    fig.update_layout(showlegend=False, hovermode="x unified", yaxis_title="Profit $ (1 contract)", yaxis_tickprefix="$")
+    st.plotly_chart(fig, use_container_width=True)
 
-with st.expander(f"All {len(trades):,} trades"):
-    st.dataframe(
-        pd.DataFrame({
-            "entry time": bars.ts[trades.entry_i].tz_localize(None),
-            "exit time": when,
-            "side": np.where(trades.direction > 0, "long", "short"),
-            "entry": trades.entry_px,
-            "exit": trades.exit_px,
-            "profit $": trades.pnl.round(2),
-            "worst point $": trades.mae.round(2),
-        }),
-        hide_index=True,
-        use_container_width=True,
-    )
+    size = f"{row.contracts:.0f} contracts" if pd.notna(row.get("contracts")) else "1 contract"
+    if pd.notna(row.get("daily_loss_stop")):
+        setup = f"{row.contracts:.0f} contracts · " + (
+            f"stop for the day after losing ${row.daily_loss_stop:,.0f}" if row.daily_loss_stop else "no daily loss stop"
+        ) + (f" · lock the day after making ${row.daily_profit_lock:,.0f}" if row.daily_profit_lock else " · no profit lock")
+        ui.rows([("Prop setup", f"{setup} <span class='bt-muted'>(picked on training data)</span>")])
+
+    pct = lambda v: f"{v:.0%}" if pd.notna(v) else "n/a"
+    ui.stats([
+        (f"Prop pass · unseen", pct(row.oos_prop_pass_rate), size, ui.GREEN),
+        ("Prop blow-up · unseen", pct(row.get("oos_prop_fail_rate")), size, ui.PINK),
+        ("Median days to pass", f"{row.oos_prop_days_to_pass:.0f}" if pd.notna(row.oos_prop_days_to_pass) else "n/a", "unseen", None),
+        ("Win rate", pct(row.is_win_rate), "training", None),
+        ("Avg trade", f"${row.is_avg_trade:,.0f}" if pd.notna(row.is_avg_trade) else "n/a", "training, 1 contract", None),
+    ])
+
+    with st.expander(f"All {len(trades):,} trades"):
+        st.dataframe(
+            pd.DataFrame({
+                "entry time": bars.ts[trades.entry_i].tz_localize(None),
+                "exit time": when,
+                "side": np.where(trades.direction > 0, "long", "short"),
+                "entry": trades.entry_px,
+                "exit": trades.exit_px,
+                "profit $": trades.pnl.round(2),
+                "worst point $": trades.mae.round(2),
+            }),
+            hide_index=True,
+            use_container_width=True,
+        )

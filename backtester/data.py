@@ -113,3 +113,40 @@ def make_sample_bars(days: int = 250, seed: int = 0, start_price: float = 5000.0
         )
         price = closes[-1] + rng.normal(0, 5)
     return pd.concat(rows, ignore_index=True)
+
+
+PARTNERS = {"ES": "NQ", "NQ": "ES"}  # the other index, for SMT divergence and PSP
+_PARTNER_CACHE = {}
+
+
+def partner_bars(bars: Bars) -> Bars | None:
+    """The partner index (ES for NQ, NQ for ES) lined up minute by minute with `bars`. None if its data isn't here."""
+    sym = PARTNERS.get(bars.symbol.upper())
+    path = DATA_DIR / f"{sym}_1m.parquet" if sym else None
+    if path is None or not path.exists():
+        return None
+    key = (sym, str(path), path.stat().st_mtime, len(bars), bars.ts[0], bars.ts[-1])
+    if key not in _PARTNER_CACHE:
+        if len(_PARTNER_CACHE) >= 2:  # ES and NQ jobs both run in one worker
+            _PARTNER_CACHE.clear()
+        df = pd.read_parquet(path).sort_values("ts").drop_duplicates("ts")
+        ts = pd.DatetimeIndex(df["ts"])
+        ts = (ts.tz_localize("UTC") if ts.tz is None else ts).tz_convert(EXCHANGE_TZ)
+        df = df.set_index(ts)[["open", "high", "low", "close", "volume"]].reindex(bars.ts)
+        close = df["close"].ffill().bfill()
+        df["open"] = df["open"].fillna(close)
+        df["high"] = df["high"].fillna(close)
+        df["low"] = df["low"].fillna(close)
+        _PARTNER_CACHE[key] = Bars(
+            sym,
+            bars.ts,
+            df["open"].to_numpy(np.float64),
+            df["high"].to_numpy(np.float64),
+            df["low"].to_numpy(np.float64),
+            close.to_numpy(np.float64),
+            df["volume"].fillna(0).to_numpy(np.float64),
+            bars.minute,
+            bars.day,
+            bars.day_dates,
+        )
+    return _PARTNER_CACHE[key]

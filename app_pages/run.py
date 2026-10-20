@@ -11,11 +11,12 @@ from backtester.data import DATA_DIR
 from backtester.instruments import INSTRUMENTS
 from backtester.prop import PROP_PRESETS
 from backtester.strategies import STRATEGIES, param_combos
+from app_pages import ui
 
 JOB = "backtest"
 TASK = "Backtester nightly"
 
-st.title("Run backtests")
+ui.header("Run", "Pick → Start → Sleep", [("Your strategies", ui.BLUE), ("Prop rules", ui.AMBER), ("Every night", ui.GREEN)])
 
 missing = sorted({i.data for i in INSTRUMENTS.values() if not (DATA_DIR / f"{i.data}_1m.parquet").exists()})
 if missing:
@@ -56,39 +57,40 @@ def status():
     return now
 
 
-busy = status()
+with ui.card("Status", "Live", ui.GREEN):
+    busy = status()
 
-st.subheader("What to test")
-c1, c2 = st.columns(2)
-insts = c1.multiselect("Contracts", list(INSTRUMENTS), default=list(INSTRUMENTS))
-strats = c2.multiselect("Strategies", sorted(STRATEGIES), default=sorted(STRATEGIES))
-c3, c4 = st.columns(2)
-presets = sorted(PROP_PRESETS)
-prop = c3.selectbox("Prop rules", presets, index=presets.index("topstep_50k"), format_func=lambda k: PROP_PRESETS[k].name)
-slip = c4.number_input("Slippage (ticks per side)", 0.0, 5.0, 1.0, 0.5)
+with ui.card("What to test", "01 · Setup", ui.BLUE):
+    c1, c2 = st.columns(2)
+    insts = c1.multiselect("Contracts", list(INSTRUMENTS), default=list(INSTRUMENTS))
+    mine = [s for s in sorted(STRATEGIES) if getattr(STRATEGIES[s], "MINE", False)]
+    strats = c2.multiselect("Strategies", sorted(STRATEGIES), default=mine or sorted(STRATEGIES))
+    c3, c4 = st.columns(2)
+    presets = sorted(PROP_PRESETS)
+    prop = c3.selectbox("Prop rules", presets, index=presets.index("topstep_50k"), format_func=lambda k: PROP_PRESETS[k].name)
+    slip = c4.number_input("Slippage (ticks per side)", 0.0, 5.0, 1.0, 0.5)
 
-n = len(insts) * sum(len(param_combos(STRATEGIES[s])) for s in strats)
-st.caption(f"{n:,} backtests. Finished ones are skipped, so pressing Start again after a stop resumes.")
+    n = len(insts) * sum(len(param_combos(STRATEGIES[s])) for s in strats)
+    st.caption(f"{n:,} backtests. Finished ones are skipped, so pressing Start again after a stop resumes.")
 
-if st.button("Start", type="primary", disabled=busy or not insts or not strats or bool(missing)):
-    jobs.start(
-        JOB,
-        ["-m", "backtester.runner", "--instruments", *insts, "--strategies", *strats, "--prop", prop, "--slippage", str(slip)],
-    )
-    st.rerun()
-
-st.divider()
-st.subheader("Run every night automatically")
-if sys.platform != "win32":
-    st.caption("Only available on Windows.")
-else:
-    scheduled = subprocess.run(["schtasks", "/Query", "/TN", TASK], capture_output=True).returncode == 0
-    on = st.toggle("Every night at 11 PM (all contracts, all strategies)", value=scheduled)
-    if on != scheduled:
-        if on:
-            bat = str(jobs.ROOT / "run_scheduled.bat")
-            subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", "23:00", "/TN", TASK, "/TR", f'"{bat}"'], capture_output=True)
-        else:
-            subprocess.run(["schtasks", "/Delete", "/TN", TASK, "/F"], capture_output=True)
+    if st.button("Start", type="primary", disabled=busy or not insts or not strats or bool(missing)):
+        jobs.start(
+            JOB,
+            ["-m", "backtester.runner", "--instruments", *insts, "--strategies", *strats, "--prop", prop, "--slippage", str(slip)],
+        )
         st.rerun()
-    st.caption("Leave the PC on and set Sleep to Never (Settings → System → Power). Useful once there are more strategies to test.")
+
+with ui.card("Run every night", "02 · Schedule", ui.AMBER):
+    if sys.platform != "win32":
+        st.caption("Only available on Windows.")
+    else:
+        scheduled = subprocess.run(["schtasks", "/Query", "/TN", TASK], capture_output=True).returncode == 0
+        on = st.toggle("Every night at 11 PM (all contracts, all strategies)", value=scheduled)
+        if on != scheduled:
+            if on:
+                bat = str(jobs.ROOT / "run_scheduled.bat")
+                subprocess.run(["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", "23:00", "/TN", TASK, "/TR", f'"{bat}"'], capture_output=True)
+            else:
+                subprocess.run(["schtasks", "/Delete", "/TN", TASK, "/F"], capture_output=True)
+            st.rerun()
+        st.caption("Leave the PC on and set Sleep to Never (Settings → System → Power). Useful once there are more strategies to test.")
