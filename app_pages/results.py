@@ -39,8 +39,8 @@ def load_results(run):
 
 
 @st.cache_resource
-def bars_for(symbol):
-    return load_bars(symbol)
+def bars_for(symbol, years=0):
+    return load_bars(symbol, years=years)
 
 
 VERDICT_ORDER = {"PASS": 0, "WATCH": 1, "FAIL": 2}
@@ -131,7 +131,8 @@ def batch_label(r):
     i = current.set_index("run").loc[r]
     cfg = json.loads(i["config"])
     when = pd.Timestamp(i["started"]).strftime("%b %d, %H:%M")
-    return f"{when} · {len(cfg.get('strategies', []))} strategies · {len(cfg.get('firms', {}))} accounts"
+    span = f"last {cfg['years']:g} yrs" if cfg.get("years") else "all data"
+    return f"{when} · {len(cfg.get('strategies', []))} strategies · {len(cfg.get('firms', {}))} accounts · {span}"
 
 
 c1, c2, c3, c4 = st.columns([2, 1.3, 0.8, 1.3])
@@ -235,7 +236,7 @@ with ui.card("Look closer", "every prop firm, equity curve and every trade", key
     row = top.iloc[choice]
     inst = get_instrument(row.instrument)
     params = json.loads(row.params)
-    bars = bars_for(inst.data)
+    bars = bars_for(inst.data, config.get("years", 0))
     sig = STRATEGIES[row.strategy].generate(bars, params)
     cfg = EvalConfig(**{k: v for k, v in config["eval"].items() if k in EvalConfig.__dataclass_fields__})
     raw = run_backtest(bars, sig, inst, cfg.slippage_ticks, 1)

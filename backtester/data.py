@@ -73,13 +73,18 @@ def bars_from_frame(df: pd.DataFrame, symbol: str) -> Bars:
     )
 
 
-def load_bars(symbol: str, path: Path | None = None) -> Bars:
+def load_bars(symbol: str, path: Path | None = None, years: float = 0) -> Bars:
+    """years > 0 keeps only the most recent `years` of data (older markets behave differently)."""
     path = Path(path) if path else DATA_DIR / f"{symbol.upper()}_1m.parquet"
     if not path.exists():
         raise FileNotFoundError(
             f"No data file at {path}. Run download_data.bat (real data) or make_sample_data.bat (fake data for testing)."
         )
-    return bars_from_frame(pd.read_parquet(path), symbol.upper())
+    df = pd.read_parquet(path)
+    if years and years > 0:
+        ts = pd.to_datetime(df["ts"], utc=True)
+        df = df[ts >= ts.max() - pd.Timedelta(days=round(365.25 * years))].reset_index(drop=True)
+    return bars_from_frame(df, symbol.upper())
 
 
 def make_sample_bars(days: int = 250, seed: int = 0, start_price: float = 5000.0, tick: float = 0.25) -> pd.DataFrame:

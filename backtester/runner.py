@@ -49,7 +49,7 @@ def connect(db_path: Path = RESULTS_DB) -> sqlite3.Connection:
 
 def _init_worker(data_paths, ctx):
     for sym, path in data_paths.items():
-        _BARS[sym] = load_bars(sym, path)
+        _BARS[sym] = load_bars(sym, path, ctx.get("years", 0))
     _CTX.update(ctx)
 
 
@@ -123,7 +123,8 @@ def build_jobs(instruments, strategies):
     return jobs
 
 
-def run(run_name, instruments, strategies, firms=None, workers=None, cfg=EvalConfig(), data_paths=None, db_path=RESULTS_DB):
+def run(run_name, instruments, strategies, firms=None, workers=None, cfg=EvalConfig(), data_paths=None, db_path=RESULTS_DB,
+        years=0):
     con = connect(db_path)
     firms = {k: PROP_PRESETS[k] for k in (firms or DEFAULT_FIRMS)}
     jobs = build_jobs(instruments, strategies)
@@ -136,7 +137,8 @@ def run(run_name, instruments, strategies, firms=None, workers=None, cfg=EvalCon
     }
     todo = [j for j in jobs if (j[0], j[1], json.dumps(j[2], sort_keys=True)) not in done]
 
-    config = {"instruments": instruments, "strategies": strategies, "firms": {k: r.to_dict() for k, r in firms.items()}, "eval": cfg.__dict__}
+    config = {"instruments": instruments, "strategies": strategies, "firms": {k: r.to_dict() for k, r in firms.items()}, "eval": cfg.__dict__,
+              "years": years}
     con.execute(
         "INSERT OR IGNORE INTO runs (run, started, config, n_jobs) VALUES (?, ?, ?, ?)",
         (run_name, datetime.now().isoformat(timespec="seconds"), json.dumps(config), len(jobs)),
@@ -145,7 +147,7 @@ def run(run_name, instruments, strategies, firms=None, workers=None, cfg=EvalCon
     con.commit()
     print(f"Run '{run_name}': {len(jobs)} backtests total, {len(done)} already done, {len(todo)} to go.")
     if todo:
-        _run_todo(con, run_name, todo, instruments, firms, cfg, n_trials, workers, data_paths)
+        _run_todo(con, run_name, todo, instruments, firms, cfg, n_trials, workers, data_paths, years)
     finalize(con, run_name, cfg)
     con.execute("UPDATE runs SET finished=? WHERE run=?", (datetime.now().isoformat(timespec="seconds"), run_name))
     con.commit()
@@ -153,11 +155,11 @@ def run(run_name, instruments, strategies, firms=None, workers=None, cfg=EvalCon
     print(f"Done. {counts.get('PASS', 0)} passed every filter, {counts.get('WATCH', 0)} on the watch list. See the Results page.")
 
 
-def _run_todo(con, run_name, todo, instruments, firms, cfg, n_trials, workers, data_paths):
+def _run_todo(con, run_name, todo, instruments, firms, cfg, n_trials, workers, data_paths, years=0):
     needed = sorted({get_instrument(s).data for s in instruments})
     data_paths = data_paths or {s: None for s in needed}
     workers = workers or max(1, (os.cpu_count() or 2) - 1)
-    ctx = {"firms": firms, "cfg": cfg, "n_trials": n_trials}
+    ctx = {"firms": firms, "cfg": cfg, "n_trials": n_trials, "years": years}
 
     t0 = time.time()
     finished = 0
@@ -187,6 +189,7 @@ def main():
     ap.add_argument("--strategies", nargs="+", default=["all"])
     ap.add_argument("--firms", nargs="+", default=["all"], help="prop firm rule sets to test against (default: every EOD account)")
     ap.add_argument("--workers", type=int, default=None, help="CPU cores to use (default: all but one)")
+    ap.add_argument("--years", type=float, default=3, help="only test the most recent N years of data (0 = all)")
     ap.add_argument("--slippage", type=float, default=1.0, help="slippage in ticks per side")
     args = ap.parse_args()
 
@@ -197,7 +200,9 @@ def main():
         name += "_firms" + hashlib.sha1(" ".join(sorted(firms)).encode()).hexdigest()[:4]
     if not args.run and set(strategies) != set(MINE):
         name += "_s" + hashlib.sha1(" ".join(sorted(strategies)).encode()).hexdigest()[:4]  # its own batch, so the luck bar matches what was tested
-    run(name, args.instruments, strategies, firms, args.workers, EvalConfig(slippage_ticks=args.slippage))
+    if not args.run and args.years:
+        name += f"_y{args.years:g}"
+    run(name, args.instruments, strategies, firms, args.workers, EvalConfig(slippage_ticks=args.slippage), years=args.years)
 
 
 if __name__ == "__main__":
