@@ -97,11 +97,64 @@ def first_pullback(bars, p):
                 limit_px=lim, expiry=expiry, window=(930, 1200))
 
 
+def _drive(bars, start, end):
+    """High, low, first open and last close of each day's [start, end) window, on every bar."""
+    w = (bars.minute >= hhmm(start)) & (bars.minute < hhmm(end))
+    return (_per_day(bars, w, bars.high, "max")[bars.day], _per_day(bars, w, bars.low, "min")[bars.day],
+            _per_day(bars, w, bars.open, "first")[bars.day], _per_day(bars, w, bars.close, "last")[bars.day])
+
+
+def pullback_plus(bars, p):
+    """First Pullback with more chances a day: morning pullback, optional afternoon pullback,
+    optional breakout entry at 11:00 if the morning pullback never filled."""
+    n = len(bars)
+    a = _atr30(bars)
+    entry = np.zeros(n, np.int8)
+    lim = np.full(n, np.nan)
+    stp = np.full(n, np.nan)
+    exp = np.ones(n, np.int64)
+
+    def setup(start, end, until, kind):
+        hi, lo, o, c = _drive(bars, start, end)
+        move = c - o
+        strong = np.abs(move) >= p["min_move"] * a
+        at = (bars.minute == hhmm(end)) & strong & np.isfinite(move)
+        d = np.where(move > 0, 1, -1).astype(np.int8)
+        if kind == "pullback":
+            px = np.where(move > 0, c - p["retrace"] * (hi - lo), c + p["retrace"] * (hi - lo))
+            lim[at] = px[at]
+        else:  # breakout through the drive's extreme
+            px = np.where(move > 0, hi + 0.25, lo - 0.25)
+            stp[at] = px[at]
+        entry[at] = d[at]
+        exp[at] = hhmm(until) - hhmm(end)
+
+    setup(930, 1000, 1100, "pullback")
+    if p["breakout"]:
+        setup(930, 1101, 1300, "breakout")
+    if p["afternoon"]:
+        setup(1200, 1330, 1500, "pullback")
+    stop = p["stop_atr"] * a
+    from .base import default_force_exit
+    from ..engine import Signals
+    ok = np.isfinite(stop) & (stop > 0)
+    entry[~ok] = 0
+    tgt = np.where(ok, stop * p["rr"], 0.0)
+    return Signals(entry, np.where(ok, stop, 0.0), tgt, default_force_exit(bars),
+                   exit_sig=np.zeros(n, np.int8), max_hold=np.zeros(n, np.int64), trail_pts=np.zeros(n),
+                   limit_px=lim, stop_px=stp, stop_cap=np.full(n, np.nan), expiry=exp)
+
+
 def _s(name, fn, desc, grid):
     return SimpleNamespace(NAME=name, DESCRIPTION=desc, PARAM_GRID=grid, generate=fn, MINE=True, SOURCE="Claude (prop)")
 
 
 PROP = [
+    _s("nq_pullback_plus", pullback_plus, "NQ First Pullback with more chances a day: the 9:30-10:00 drive pullback "
+       "(as in First Pullback), plus optionally a breakout entry at 11:00 through the morning extreme if no pullback came, "
+       "and an afternoon pullback after a strong 12:00-1:30 PM move. Stop 1 ATR, target 2-3R.",
+       {"min_move": [0.75, 1.0], "retrace": [0.382, 0.5], "rr": [2, 3], "stop_atr": [1.0], "breakout": [False, True],
+        "afternoon": [False, True]}),
     _s("nq_orb_fast", orb_fast, "Prop-fast opening range breakout (NQ): mark the high/low of the first 5/15/30 minutes after "
        "9:30, take the first break either way (one trade a day), stop at half or all of the range, target 1.5-3R. "
        "Optional filters: only with the overnight direction, or skip days with an oversized range.",
