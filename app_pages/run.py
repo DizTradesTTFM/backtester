@@ -108,7 +108,7 @@ firms = [k for k in firm_keys if st.session_state[f"f_{k}"]]
 # ---- 03 start ----------------------------------------------------------------
 with ui.card("Start", "", key="pick_start", number="03"):
     c1, c2, c3, c4 = st.columns([2.6, 1.3, 1.3, 1])
-    insts = c1.multiselect("Markets", list(MARKETS), default=list(MARKETS), format_func=MARKETS.get)
+    insts = c1.multiselect("Markets", list(MARKETS), default=["NQ"], format_func=MARKETS.get)
     years = c2.selectbox("Data to test", [1, 2, 3, 5, 0], index=2,
                          format_func=lambda y: "All history" if y == 0 else f"Last {y} year{'s' if y > 1 else ''}",
                          help="Last 30% is kept as new data the strategy never sees while being picked.")

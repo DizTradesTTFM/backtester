@@ -185,7 +185,7 @@ def _run_todo(con, run_name, todo, instruments, firms, cfg, n_trials, workers, d
 def main():
     ap = argparse.ArgumentParser(description="Run thousands of backtests and save the results.")
     ap.add_argument("--run", default=None, help="batch name (default: based on the data files). Re-using a name resumes it")
-    ap.add_argument("--instruments", nargs="+", default=["ES", "NQ"])
+    ap.add_argument("--instruments", nargs="+", default=["NQ"])
     ap.add_argument("--strategies", nargs="+", default=["all"])
     ap.add_argument("--firms", nargs="+", default=["all"], help="prop firm rule sets to test against (default: every EOD account)")
     ap.add_argument("--workers", type=int, default=None, help="CPU cores to use (default: all but one)")
