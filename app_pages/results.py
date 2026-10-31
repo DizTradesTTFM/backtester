@@ -86,6 +86,11 @@ def pf(v):
     return "–" if pd.isna(v) else ("∞" if np.isinf(v) else f"{v:.2f}")
 
 
+def timeout(p, f):
+    """Share of evaluations that neither passed nor blew up: still short of the target when time ran out."""
+    return "–" if pd.isna(p) or pd.isna(f) else f'<span style="color:{ui.AMBER}">{max(0.0, 1 - p - f):.0%}</span>'
+
+
 def days(v):
     return f"{v:.0f}" if pd.notna(v) else "–"
 
@@ -198,29 +203,29 @@ with ui.card("Strategies compared", "best setup of each, on new data", key="comp
             f'<div class="name">{ui.esc(title(strat))}</div><div class="set">{inst} · {len(g):,} setups</div>',
             ui.pill(b.verdict),
             pct(b.oos_win_rate), pf(b.oos_profit_factor), days(b.oos_prop_days_to_pass),
-            pct(b.oos_prop_pass_rate), pct(b.oos_prop_fail_rate),
+            pct(b.oos_prop_pass_rate), pct(b.oos_prop_fail_rate), timeout(b.oos_prop_pass_rate, b.oos_prop_fail_rate),
             firm_html(b.best_firm),
             ui.esc(g.loc[g.verdict == "FAIL", "problem"].mode().iat[0] if (g.verdict == "FAIL").any() else "–"),
         ]))
     body.sort(key=lambda x: (x[0], x[1]))
-    ui.table(["Strategy", "Result", *KEY_HEADERS, "Prop pass", "Blow-up", "Firm", "Main problem"],
-             [r for _, _, r in body], num_cols=(2, 3, 4, 5, 6))
+    ui.table(["Strategy", "Result", *KEY_HEADERS, "Prop pass", "Blow-up", "Out of time", "Firm", "Main problem"],
+             [r for _, _, r in body], num_cols=(2, 3, 4, 5, 6, 7))
 
 # ---- 3. best setups ------------------------------------------------------------
 # settings that made no difference give identical results: show each distinct result once
 top = ranked.drop_duplicates(["instrument", "strategy", "oos_net_profit", "oos_trades", "is_net_profit"]).head(5)
 with ui.card("Top 5 setups", "ranked by prop pass rate on new data", key="top", number="03"):
     ui.table(
-        ["#", "Setup", "", *KEY_HEADERS, "Prop pass", "Blow-up", "Firm"],
+        ["#", "Setup", "", *KEY_HEADERS, "Prop pass", "Blow-up", "Out of time", "Firm"],
         [[
             f'<span class="rank">{i + 1}</span>',
             f'<div class="name">{label(r)}</div><div class="set">{ui.esc(ui.settings_text(json.loads(r.params)))}</div>',
             ui.pill(r.verdict),
             pct(r.oos_win_rate), pf(r.oos_profit_factor), days(r.oos_prop_days_to_pass),
-            pct(r.oos_prop_pass_rate), pct(r.oos_prop_fail_rate),
+            pct(r.oos_prop_pass_rate), pct(r.oos_prop_fail_rate), timeout(r.oos_prop_pass_rate, r.oos_prop_fail_rate),
             firm_html(r.best_firm),
         ] for i, (_, r) in enumerate(top.iterrows())],
-        num_cols=(3, 4, 5, 6, 7),
+        num_cols=(3, 4, 5, 6, 7, 8),
     )
 
 # ---- 4. one setup up close -------------------------------------------------------
@@ -268,10 +273,11 @@ with ui.card("Look closer", "every prop firm, equity curve and every trade", key
                    + f' · drawdown ${r_.max_loss:,.0f} {r_.trailing.upper()}</div>' if r_ else ""),
                 f'<span style="color:{ui.GREEN}">{pct(row.get(f"f_{k}_oos_pass"))}</span>',
                 f'<span style="color:{ui.PINK}">{pct(row.get(f"f_{k}_oos_fail"))}</span>',
+                timeout(row.get(f"f_{k}_oos_pass"), row.get(f"f_{k}_oos_fail")),
                 days(row.get(f"f_{k}_oos_days")),
             ])
         ui.section("Every prop firm", "same trades, each firm's rules and risk, on new data")
-        ui.table(["Firm", "Pass", "Blow-up", "Days to pass"], firm_rows, num_cols=(1, 2, 3))
+        ui.table(["Firm", "Pass", "Blow-up", "Out of time", "Days to pass"], firm_rows, num_cols=(1, 2, 3, 4))
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=when, y=equity, mode="lines", line=dict(color=ui.BLUE, width=2),
