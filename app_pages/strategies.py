@@ -1,22 +1,28 @@
-"""Strategies page: every strategy in the app, in plain English, with how many settings it tries."""
+"""Strategies page: every strategy in the app, in plain English, with the settings it tries."""
 
 import streamlit as st
 
 from app_pages import ui
 from backtester.strategies import STRATEGIES, param_combos
 
-ui.header("Strategies", "Describe it → Claude codes it → it shows up here", [("Yours", ui.BLUE), ("Built-in", ui.MUTED)])
-st.caption(
-    "To add your own, describe it to Claude in plain words: when you enter, where the stop goes, "
-    "where you take profit, and what hours you trade. It shows up here the next time you open the app."
-)
+ui.header("Strategies", "To add one, describe it to Claude in plain words: entry, stop, target and hours. "
+          "It shows up here the next time you open the app.")
 
 mine = [n for n in sorted(STRATEGIES) if getattr(STRATEGIES[n], "MINE", False)]
 others = [n for n in sorted(STRATEGIES) if n not in mine]
-for i, name in enumerate(mine + others):
+
+
+def show(name):
     mod = STRATEGIES[name]
-    yours = name in mine
-    with ui.card(name, ("Yours" if yours else "Built-in") + f" · {len(param_combos(mod)):,} combos",
-                 ui.BLUE if yours else ui.MUTED, key=f"strat_{name}"):
-        ui.rows([("What it does", mod.DESCRIPTION)]
-                + [(k, " · ".join(str(x) for x in v)) for k, v in mod.PARAM_GRID.items()])
+    ui.rows([("What it does", ui.esc(mod.DESCRIPTION))]
+            + [(k.replace("_", " "), " · ".join(ui.esc(ui._word(k, x)) for x in v)) for k, v in mod.PARAM_GRID.items()])
+
+
+for name in mine:
+    with ui.card(name, f"yours · tests {len(param_combos(STRATEGIES[name])):,} setting combos", key=f"strat_{name}"):
+        show(name)
+
+with st.expander(f"Built-in example strategies ({len(others)})"):
+    for name in others:
+        ui.section(name, f"{len(param_combos(STRATEGIES[name])):,} combos")
+        show(name)

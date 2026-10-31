@@ -1,4 +1,4 @@
-"""Results page: leaderboard, equity curves and trades for each batch."""
+"""Results page: the answer first (does anything work?), then strategies compared, best setups, details, raw table."""
 
 import html
 import json
@@ -41,179 +41,227 @@ def bars_for(symbol):
     return load_bars(symbol)
 
 
+VERDICT_ORDER = {"PASS": 0, "WATCH": 1, "FAIL": 2}
+
+
+def problem(reason: str) -> str:
+    """The verdict reason in a few plain words."""
+    r = str(reason)
+    if r.startswith("loses money"):
+        return "Loses money"
+    if r.startswith("falls apart"):
+        return "Stops working on new data"
+    if r.startswith("only profitable"):
+        return "Too inconsistent"
+    if r.startswith("too few"):
+        return "Too few trades"
+    if r.startswith("training Sharpe"):
+        return "Could just be luck"
+    if "prop pass" in r:
+        return "Too weak for prop rules"
+    if r.startswith("just under"):
+        return "Almost beats the luck check"
+    return "Passes every check" if r.startswith("survived") else r
+
+
+def pct(v):
+    return f"{v:.0%}" if pd.notna(v) else "–"
+
+
+def money(v):
+    return "–" if pd.isna(v) else (f"-${-v:,.0f}" if v < 0 else f"${v:,.0f}")
+
+
+def money_colored(v):
+    return money(v) if pd.isna(v) else f'<span style="color:{ui.GREEN if v > 0 else ui.PINK}">{money(v)}</span>'
+
+
+def label(r):
+    return f"{r.instrument} · {r.strategy}"
+
+
 runs = load_runs()
-ui.header("Results", "Test → Filter → Fund", [("✓ Pass", ui.GREEN), ("◎ Watch", ui.AMBER), ("✕ Fail", ui.PINK)])
 if runs.empty:
-    st.info("No results yet. Go to **Run** and press Start.")
+    ui.header("Results", "Nothing tested yet.")
+    st.info("Go to **Run** and press Start. Results show up here when it's done.")
     st.stop()
 
-run = st.selectbox("Batch", runs["run"], format_func=lambda r: f"{r}  ({runs.set_index('run').loc[r, 'started']})")
+# ---- header + filters ----------------------------------------------------------
+ui.header("Results", "What worked, what didn't, and why. Numbers are on data the strategy never saw while being picked.")
+c1, c2, c3 = st.columns([2, 1, 1])
+run = c1.selectbox("Test batch", runs["run"], format_func=lambda r: f"{runs.set_index('run').loc[r, 'started'][:16].replace('T', ' ')}  ·  {r}")
 run_info = runs.set_index("run").loc[run]
 config = json.loads(run_info["config"])
-df = load_results(run)
-if df.empty:
+all_df = load_results(run)
+if all_df.empty:
     st.warning("This batch has no finished backtests yet.")
     st.stop()
+strat_pick = c2.selectbox("Strategy", ["All"] + sorted(all_df.strategy.unique()))
+inst_pick = c3.selectbox("Contract", ["All"] + sorted(all_df.instrument.unique()))
+df = all_df[((all_df.strategy == strat_pick) | (strat_pick == "All")) & ((all_df.instrument == inst_pick) | (inst_pick == "All"))].copy()
+df["problem"] = df["reason"].map(problem)
+df["rank_key"] = df.verdict.map(VERDICT_ORDER)
+ranked = df.sort_values(["rank_key", "oos_prop_pass_rate", "oos_net_profit"], ascending=[True, False, False], na_position="last")
 
-done = len(df)
-ui.stats([
-    ("Backtests finished", f"{done:,}", f"of {int(run_info['n_jobs']):,}", None),
-    ("Passed every filter", int((df.verdict == "PASS").sum()), "ready to try on a prop account", ui.GREEN),
-    ("Watch list", int((df.verdict == "WATCH").sum()), "close, needs a second look", ui.AMBER),
-    ("Failed", f"{int((df.verdict == 'FAIL').sum()):,}", "luck, losses or blow-ups", ui.PINK),
-])
-st.caption(
-    f"Prop rules: {config['prop']['name']} · target \\${config['prop']['profit_target']:,.0f}, "
-    f"max loss \\${config['prop']['max_loss']:,.0f} ({config['prop']['trailing']} trailing), "
-    f"daily limit \\${config['prop']['daily_loss_limit']:,.0f} · slippage {config['eval']['slippage_ticks']} tick/side"
-)
+n_pass, n_watch, n_fail = (int((df.verdict == v).sum()) for v in ("PASS", "WATCH", "FAIL"))
+best = ranked.iloc[0]
 
-with st.expander("Why strategies failed"):
-    reasons = df.loc[df.verdict == "FAIL", "reason"].str.replace(r"\s*\(.*|\s[\d.]+.*", "", regex=True)
-    st.bar_chart(reasons.value_counts(), horizontal=True, color=ui.BLUE)
+# ---- 1. the answer -----------------------------------------------------------
+with ui.card("The bottom line", f"{len(df):,} setups tested", key="answer", number="01"):
+    common = df.loc[df.verdict == "FAIL", "problem"].value_counts()
+    if n_pass:
+        msg = (f"<b style='color:{ui.GREEN}'>{n_pass} setup{'s' if n_pass > 1 else ''} passed every check.</b> "
+               f"Best: {label(best)}, which passed the prop evaluation {pct(best.oos_prop_pass_rate)} of the time on new data.")
+    elif n_watch:
+        msg = (f"<b style='color:{ui.AMBER}'>Nothing is ready yet, but {n_watch} setup{'s are' if n_watch > 1 else ' is'} close.</b> "
+               f"Closest: {label(best)}, passing the prop evaluation {pct(best.oos_prop_pass_rate)} of the time on new data.")
+    else:
+        top = common.index[0] if len(common) else "–"
+        share = common.iloc[0] / max(1, n_fail) if len(common) else 0
+        msg = (f"<b style='color:{ui.PINK}'>Nothing works yet.</b> "
+               f"<span class='m'>Most common problem: {top.lower()} ({share:.0%} of setups).</span>")
+    ui._html(f'<div class="bt-answer">{msg}</div>')
+    ui.stats([
+        ("Ready for a prop account", n_pass, "passed every check", ui.GREEN if n_pass else None),
+        ("Close", n_watch, "worth a second look", ui.AMBER if n_watch else None),
+        ("Fail", f"{n_fail:,}", "see why below", None),
+        ("Made money on new data", pct((df.oos_net_profit > 0).mean()), "share of all setups", None),
+    ])
+    if len(common):
+        bars_html = "".join(
+            f'<div class="bt-row"><div class="k">{ui.esc(k)}</div><div class="v">'
+            f'<div style="display:flex;align-items:center;gap:10px"><div style="height:8px;border-radius:4px;background:{ui.PINK};'
+            f'opacity:.75;width:{max(2, v / common.iloc[0] * 70):.0f}%"></div><span class="bt-muted">{v:,}</span></div></div></div>'
+            for k, v in common.items()
+        )
+        ui._html('<div class="bt-muted" style="font-size:13px;margin-top:4px">Why setups failed</div>' + bars_html)
 
-# ---- leaderboard -------------------------------------------------------------
-cols = {
-    "verdict": "Verdict",
-    "instrument": "Contract",
-    "strategy": "Strategy",
-    "params": "Settings",
-    "contracts": "Contracts",
-    "daily_loss_stop": "Daily loss stop $",
-    "daily_profit_lock": "Daily profit lock $",
-    "oos_prop_pass_rate": "Prop pass % (unseen)",
-    "oos_prop_fail_rate": "Prop blow-up % (unseen)",
-    "oos_net_profit": "Profit $ (unseen)",
-    "oos_profit_factor": "Profit factor (unseen)",
-    "is_net_profit": "Profit $ (training)",
-    "is_sharpe": "Sharpe (training)",
-    "luck_bar": "Luck bar",
-    "robustness": "Neighbors profitable",
-    "stability": "Periods profitable",
-    "oos_long_profit": "Longs $ (unseen)",
-    "oos_short_profit": "Shorts $ (unseen)",
-    "is_trades": "Trades",
-    "is_max_drawdown": "Max drawdown $",
-    "reason": "Why",
-}
-with ui.card("Leaderboard", "01 · Best first", ui.BLUE):
-    f1, f2, f3 = st.columns(3)
-    verdicts = f1.multiselect("Verdict", ["PASS", "WATCH", "FAIL"], default=["PASS", "WATCH"])
-    insts = f2.multiselect("Contract", sorted(df.instrument.unique()), default=sorted(df.instrument.unique()))
-    strats = f3.multiselect("Strategy", sorted(df.strategy.unique()), default=sorted(df.strategy.unique()))
-    view = df[df.verdict.isin(verdicts) & df.instrument.isin(insts) & df.strategy.isin(strats)]
-    sort_by = ["oos_prop_pass_rate", "is_sharpe"]
-    if view.empty and verdicts == ["PASS", "WATCH"]:
-        st.info("Nothing survived the filters in this batch. Showing the closest failures (best training Sharpe).")
-        view = df[df.instrument.isin(insts) & df.strategy.isin(strats)]
-        sort_by = ["is_sharpe"]
+# ---- 2. strategies compared ----------------------------------------------------
+with ui.card("Strategies compared", "best setup of each, on new data", key="compare", number="02"):
+    body = []
+    for (strat, inst), g in df.groupby(["strategy", "instrument"]):
+        b = g.sort_values(["rank_key", "oos_prop_pass_rate", "oos_net_profit"], ascending=[True, False, False]).iloc[0]
+        body.append((b.rank_key, -(b.oos_prop_pass_rate if pd.notna(b.oos_prop_pass_rate) else -1), [
+            f'<div class="name">{ui.esc(strat)}</div><div class="set">{inst} · {len(g):,} setups</div>',
+            ui.pill(b.verdict),
+            pct((g.oos_net_profit > 0).mean()),
+            pct(b.oos_prop_pass_rate),
+            pct(b.oos_prop_fail_rate),
+            money_colored(b.oos_net_profit),
+            ui.esc(g.loc[g.verdict == "FAIL", "problem"].mode().iat[0] if (g.verdict == "FAIL").any() else "–"),
+        ]))
+    body.sort(key=lambda x: (x[0], x[1]))
+    ui.table(["Strategy", "Best result", "Setups profitable", "Prop pass", "Prop blow-up", "Profit (1 contract)", "Main problem"],
+             [r for _, _, r in body], num_cols=(2, 3, 4, 5))
+    ui._html('<div class="bt-muted" style="font-size:13px">Prop pass / blow-up: how often the best setup passed or failed a '
+             f'simulated {ui.esc(config["prop"]["name"])} evaluation on new data.</div>')
 
-    table = (
-        view.sort_values(sort_by, ascending=False, na_position="last")
-        .reindex(columns=list(cols))
-        .head(500)
-        .rename(columns=cols)
-        .reset_index()
-    )
-    shown = table.drop(columns="index")
-    picked = st.dataframe(
-        shown.style.map(lambda v: f"color: {ui.VERDICT_COLORS.get(v, ui.TEXT)}; font-weight: 600", subset=["Verdict"]),
-        hide_index=True,
-        use_container_width=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        column_config={
-            "Prop pass % (unseen)": st.column_config.NumberColumn(format="percent"),
-            "Prop blow-up % (unseen)": st.column_config.NumberColumn(format="percent"),
-            "Periods profitable": st.column_config.NumberColumn(format="percent"),
-            "Neighbors profitable": st.column_config.NumberColumn(format="percent"),
-            "Daily loss stop $": st.column_config.NumberColumn(format="$%d", help="0 = off"),
-            "Daily profit lock $": st.column_config.NumberColumn(format="$%d", help="0 = off"),
-            "Longs $ (unseen)": st.column_config.NumberColumn(format="dollar"),
-            "Shorts $ (unseen)": st.column_config.NumberColumn(format="dollar"),
-            "Profit $ (unseen)": st.column_config.NumberColumn(format="dollar"),
-            "Profit $ (training)": st.column_config.NumberColumn(format="dollar"),
-            "Max drawdown $": st.column_config.NumberColumn(format="dollar"),
-            "Sharpe (training)": st.column_config.NumberColumn(format="%.2f"),
-            "Luck bar": st.column_config.NumberColumn(format="%.2f"),
-            "Profit factor (unseen)": st.column_config.NumberColumn(format="%.2f"),
-        },
-    )
-    st.caption(
-        "**Training** = the older 70% of data the settings were picked on. **Unseen** = the newest 30%, never used for "
-        "picking: that's the honest number. **Luck bar** = the Sharpe the best of this many random strategies would hit "
-        "by pure luck; training Sharpe must beat it. **Contracts / Daily loss stop / Daily profit lock** = the prop setup "
-        "with the best pass rate in training (stop trading for the day after losing or making that much; 0 = off). "
-        "**Neighbors profitable** = share of settings one notch away that also made money (high = not a fluke). "
-        "Dollar columns are for 1 contract."
+# ---- 3. best setups ------------------------------------------------------------
+# settings that made no difference give identical results: show each distinct result once
+top = ranked.drop_duplicates(["instrument", "strategy", "oos_net_profit", "oos_trades", "is_net_profit"]).head(5)
+with ui.card("Top 5 setups", "ranked by prop pass rate on new data, identical results shown once", key="top", number="03"):
+    ui.table(
+        ["#", "Setup", "", "Prop pass", "Blow-up", "Profit", "Win rate", "Trades / month"],
+        [[
+            f'<span class="rank">{i + 1}</span>',
+            f'<div class="name">{label(r)}</div><div class="set">{ui.esc(ui.settings_text(json.loads(r.params)))}</div>',
+            ui.pill(r.verdict),
+            pct(r.oos_prop_pass_rate),
+            pct(r.oos_prop_fail_rate),
+            money_colored(r.oos_net_profit),
+            pct(r.oos_win_rate),
+            f"{r.oos_trades_per_day * 21:.0f}" if pd.notna(r.oos_trades_per_day) else "–",
+        ] for i, (_, r) in enumerate(top.iterrows())],
+        num_cols=(3, 4, 5, 6, 7),
     )
 
-# ---- detail ------------------------------------------------------------------
-rows = picked.selection.rows if picked and picked.selection else []
-if not rows:
-    st.info("Click a row in the leaderboard to see its equity curve and trades.")
-    st.stop()
+# ---- 4. one setup up close -------------------------------------------------------
+with ui.card("Look closer", "equity curve, prop setup and every trade", key="detail", number="04"):
+    choice = st.radio("Setup", list(range(len(top))), horizontal=True, label_visibility="collapsed",
+                      format_func=lambda i: f"#{i + 1}  {label(top.iloc[i])}")
+    row = top.iloc[choice]
+    inst = get_instrument(row.instrument)
+    params = json.loads(row.params)
+    bars = bars_for(inst.data)
+    sig = STRATEGIES[row.strategy].generate(bars, params)
+    cfg = EvalConfig(**config["eval"])
+    trades = run_backtest(bars, sig, inst, cfg.slippage_ticks, cfg.qty)
 
-row = view.loc[table.loc[rows[0], "index"]]
-inst = get_instrument(row.instrument)
-params = json.loads(row.params)
-bars = bars_for(inst.data)
-sig = STRATEGIES[row.strategy].generate(bars, params)
-cfg = EvalConfig(**config["eval"])
-trades = run_backtest(bars, sig, inst, cfg.slippage_ticks, cfg.qty)
+    n_days = int(bars.day[-1]) + 1
+    split_ts = pd.Timestamp(bars.day_dates[int(n_days * (1 - cfg.oos_fraction))])
+    when = bars.ts[trades.exit_i].tz_localize(None)
+    equity = np.cumsum(trades.pnl)
 
-n_days = int(bars.day[-1]) + 1
-split_day = int(n_days * (1 - cfg.oos_fraction))
-when = bars.ts[trades.exit_i].tz_localize(None)
-equity = np.cumsum(trades.pnl)
-split_ts = pd.Timestamp(bars.day_dates[split_day])
-
-color = ui.VERDICT_COLORS.get(row.verdict, ui.BLUE)
-with ui.card(f"{row.instrument} · {row.strategy}", f"02 · {row.verdict}", color, key="detail"):
+    setup = "–"
+    if pd.notna(row.get("contracts")):
+        setup = (f"{row.contracts:.0f} contract{'s' if row.contracts != 1 else ''} · "
+                 + (f"stop for the day after losing ${row.daily_loss_stop:,.0f}" if row.daily_loss_stop else "no daily loss stop")
+                 + (f" · stop for the day after making ${row.daily_profit_lock:,.0f}" if row.daily_profit_lock else ""))
     ui.rows([
-        ("What it does", STRATEGIES[row.strategy].DESCRIPTION),
-        ("Settings", " · ".join(f"<span class='mono'>{k}</span> {v}" for k, v in params.items())),
-        ("Verdict", f"<span style='color:{color}'>{row.verdict}</span> <span class='bt-muted'>{html.escape(str(row.reason))}</span>"),
+        ("Result", f"{ui.pill(row.verdict)} &nbsp;<span class='bt-muted'>{ui.esc(problem(row.reason))}</span>"),
+        ("Settings", ui.esc(ui.settings_text(params))),
+        ("Best prop setup", setup + " <span class='bt-muted'>(picked on the older data)</span>"),
+    ])
+    ui.stats([
+        ("Prop pass", pct(row.oos_prop_pass_rate), "new data", ui.GREEN),
+        ("Prop blow-up", pct(row.oos_prop_fail_rate), "new data", ui.PINK),
+        ("Days to pass", f"{row.oos_prop_days_to_pass:.0f}" if pd.notna(row.oos_prop_days_to_pass) else "–", "median", None),
+        ("Win rate", pct(row.oos_win_rate), "new data", None),
+        ("Profit", money(row.oos_net_profit), "new data, 1 contract", None),
+        ("Worst drawdown", money(row.oos_max_drawdown), "new data, 1 contract", None),
     ])
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=when, y=equity, mode="lines", line=dict(color=ui.BLUE, width=2), name="Equity",
+    fig.add_trace(go.Scatter(x=when, y=equity, mode="lines", line=dict(color=ui.BLUE, width=2),
                              hovertemplate="%{x|%b %d %Y %H:%M}<br>$%{y:,.0f}<extra></extra>"))
-    fig.add_vline(x=split_ts, line=dict(color=ui.MUTED, width=1, dash="dot"))
     fig.add_vrect(x0=split_ts, x1=when.max() if len(when) else split_ts, fillcolor=ui.AMBER, opacity=0.06, line_width=0)
-    fig.add_annotation(x=split_ts, y=1, yref="paper", text="unseen data →", showarrow=False, xanchor="left",
-                       yanchor="bottom", font=dict(color=ui.AMBER, family="JetBrains Mono"))
+    fig.add_vline(x=split_ts, line=dict(color=ui.MUTED, width=1, dash="dot"))
+    fig.add_annotation(x=split_ts, y=1, yref="paper", text="  new data (the honest test) →", showarrow=False,
+                       xanchor="left", yanchor="bottom", font=dict(color=ui.AMBER))
     ui.plot_layout(fig)
-    fig.update_layout(showlegend=False, hovermode="x unified", yaxis_title="Profit $ (1 contract)", yaxis_tickprefix="$")
-    st.plotly_chart(fig, use_container_width=True)
-
-    size = f"{row.contracts:.0f} contracts" if pd.notna(row.get("contracts")) else "1 contract"
-    if pd.notna(row.get("daily_loss_stop")):
-        setup = f"{row.contracts:.0f} contracts · " + (
-            f"stop for the day after losing ${row.daily_loss_stop:,.0f}" if row.daily_loss_stop else "no daily loss stop"
-        ) + (f" · lock the day after making ${row.daily_profit_lock:,.0f}" if row.daily_profit_lock else " · no profit lock")
-        ui.rows([("Prop setup", f"{setup} <span class='bt-muted'>(picked on training data)</span>")])
-
-    pct = lambda v: f"{v:.0%}" if pd.notna(v) else "n/a"
-    ui.stats([
-        (f"Prop pass · unseen", pct(row.oos_prop_pass_rate), size, ui.GREEN),
-        ("Prop blow-up · unseen", pct(row.get("oos_prop_fail_rate")), size, ui.PINK),
-        ("Median days to pass", f"{row.oos_prop_days_to_pass:.0f}" if pd.notna(row.oos_prop_days_to_pass) else "n/a", "unseen", None),
-        ("Win rate", pct(row.is_win_rate), "training", None),
-        ("Avg trade", f"${row.is_avg_trade:,.0f}" if pd.notna(row.is_avg_trade) else "n/a", "training, 1 contract", None),
-    ])
+    fig.update_layout(showlegend=False, hovermode="x unified", yaxis_tickprefix="$", yaxis_title="Profit, 1 contract")
+    st.plotly_chart(fig, width="stretch")
 
     with st.expander(f"All {len(trades):,} trades"):
         st.dataframe(
             pd.DataFrame({
-                "entry time": bars.ts[trades.entry_i].tz_localize(None),
-                "exit time": when,
-                "side": np.where(trades.direction > 0, "long", "short"),
-                "entry": trades.entry_px,
-                "exit": trades.exit_px,
-                "profit $": trades.pnl.round(2),
-                "worst point $": trades.mae.round(2),
+                "Entry": bars.ts[trades.entry_i].tz_localize(None),
+                "Exit": when,
+                "Side": np.where(trades.direction > 0, "long", "short"),
+                "Entry price": trades.entry_px,
+                "Exit price": trades.exit_px,
+                "Profit $": trades.pnl.round(2),
+                "Worst point $": trades.mae.round(2),
             }),
-            hide_index=True,
-            use_container_width=True,
+            hide_index=True, width="stretch",
         )
+
+# ---- 5. everything -------------------------------------------------------------
+with st.expander(f"Every result ({len(df):,} rows, for digging)"):
+    full = ranked.assign(
+        Result=ranked.verdict.map(ui.VERDICT_WORDS),
+        Setup=ranked.instrument + " · " + ranked.strategy,
+        Settings=ranked.params.map(lambda p: ui.settings_text(json.loads(p))),
+        Problem=ranked.problem,
+    )[["Result", "Setup", "Settings", "oos_prop_pass_rate", "oos_prop_fail_rate", "oos_net_profit", "oos_win_rate",
+       "is_net_profit", "contracts", "robustness", "Problem"]]
+    st.dataframe(
+        full.rename(columns={
+            "oos_prop_pass_rate": "Prop pass", "oos_prop_fail_rate": "Blow-up", "oos_net_profit": "Profit (new data)",
+            "oos_win_rate": "Win rate", "is_net_profit": "Profit (older data)", "contracts": "Contracts",
+            "robustness": "Nearby settings profitable",
+        }),
+        hide_index=True, width="stretch",
+        column_config={
+            "Prop pass": st.column_config.NumberColumn(format="percent"),
+            "Blow-up": st.column_config.NumberColumn(format="percent"),
+            "Win rate": st.column_config.NumberColumn(format="percent"),
+            "Nearby settings profitable": st.column_config.NumberColumn(format="percent"),
+            "Profit (new data)": st.column_config.NumberColumn(format="dollar"),
+            "Profit (older data)": st.column_config.NumberColumn(format="dollar"),
+        },
+    )
+    st.caption(
+        f"Older data = the first 70% of history, used to pick settings. New data = the last 30%, never used for picking. "
+        f"Prop rules: {config['prop']['name']}, slippage {config['eval']['slippage_ticks']} tick per side."
+    )

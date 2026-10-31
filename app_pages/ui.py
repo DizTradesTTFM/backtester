@@ -1,65 +1,71 @@
-"""Shared look for every page: the BmT Journal style (dark cards with window dots, mono labels, colored pills)."""
+"""Shared look for every page: dark, clean sections, plain-English labels."""
 
+import html as _h
 from contextlib import contextmanager
 
 import streamlit as st
 
 BLUE, AMBER, PINK, GREEN = "#4aa3ff", "#ffb020", "#ff5c8a", "#3ddc84"
-TEXT, MUTED, DIM, LINE = "#f2f2f3", "#8a8a93", "#7c7c86", "#202024"
+TEXT, MUTED, DIM, LINE = "#f2f2f3", "#8a8a93", "#6b6b74", "#202024"
 VERDICT_COLORS = {"PASS": GREEN, "WATCH": AMBER, "FAIL": PINK}
+VERDICT_WORDS = {"PASS": "Ready", "WATCH": "Close", "FAIL": "Fails"}
 
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-.block-container {max-width: 1360px; padding-top: 3.2rem; padding-bottom: 4rem;}
-h1, h2, h3 {font-family: 'Geist', system-ui, sans-serif !important; letter-spacing: -0.03em;}
-.mono {font-family: 'JetBrains Mono', monospace;}
+.block-container {max-width: 1180px; padding-top: 3.6rem; padding-bottom: 5rem;}
+h1, h2, h3 {font-family: 'Geist', system-ui, sans-serif !important; letter-spacing: -0.02em;}
 
-/* page header */
-.bt-head {display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 0 0 18px;}
-.bt-head h1 {margin: 0; padding: 0; font-size: 52px; font-weight: 700; letter-spacing: -0.035em; line-height: 1.05; text-align: center;}
-.bt-head .sub {font-family: 'JetBrains Mono', monospace; font-size: 14px; letter-spacing: 0.08em; color: #f2f2f3; text-align: center;}
-.bt-pills {display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 6px;}
-.bt-pill {font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
-          padding: 9px 15px; border: 1px solid #26262b; border-radius: 999px;}
+/* page header: left aligned, one line of context */
+.bt-head {margin: 0 0 4px;}
+.bt-head h1 {margin: 0; padding: 0; font-size: 34px; font-weight: 700; line-height: 1.1;}
+.bt-head .sub {margin-top: 6px; font-size: 15px; color: #8a8a93;}
 
-/* cards: st.container(key="card_...") */
-div[class*="st-key-card_"] {background: #101012; border: 1px solid #26262b; border-radius: 14px; padding: 0 24px 22px; overflow: hidden; gap: 0.9rem;}
-.bt-bar {display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
-         margin: 0 -24px 6px; padding: 15px 24px; border-bottom: 1px solid #202024; background: #0e0e10;}
-.bt-bar .l {display: flex; align-items: center; gap: 16px;}
-.bt-dots {display: flex; gap: 8px;} .bt-dots i {width: 12px; height: 12px; border-radius: 50%; display: block;}
-.bt-label {font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.16em; color: #8a8a93; text-transform: uppercase;}
-.bt-tag {font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;}
+/* sections: st.container(key="card_...") */
+div[class*="st-key-card_"] {background: #101012; border: 1px solid #222227; border-radius: 16px; padding: 22px 26px 24px; gap: 0.9rem;}
+.bt-sec {display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;}
+.bt-sec .t {font-size: 19px; font-weight: 600; letter-spacing: -0.01em;}
+.bt-sec .n {font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6b6b74; margin-right: 10px;}
+.bt-sec .h {font-size: 13px; color: #8a8a93;}
 
-/* stat tiles */
-.bt-stats {display: flex; flex-wrap: wrap; gap: 14px;}
-.bt-stat {flex: 1 1 160px; background: #0e0e10; border: 1px solid #202024; border-radius: 12px; padding: 14px 18px;}
-.bt-stat .k {font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.14em; color: #8a8a93; text-transform: uppercase;}
-.bt-stat .v {font-size: 30px; font-weight: 600; letter-spacing: -0.02em; margin-top: 6px;}
-.bt-stat .s {font-size: 13px; color: #7c7c86; margin-top: 2px;}
+/* the one-sentence answer */
+.bt-answer {font-size: 22px; line-height: 1.4; font-weight: 500; letter-spacing: -0.01em;}
+.bt-answer .m {color: #8a8a93; font-weight: 400;}
 
-/* key/value rows like the journal */
-.bt-row {display: flex; flex-wrap: wrap; gap: 6px 24px; padding: 12px 0; border-top: 1px solid #202024;}
-.bt-row:first-child {border-top: 0;}
-.bt-row .k {flex: 0 0 170px; font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.14em; color: #8a8a93; text-transform: uppercase; padding-top: 3px;}
-.bt-row .v {flex: 1 1 220px; font-size: 16px; line-height: 1.45;}
-.bt-muted {color: #7c7c86; font-size: 14px; line-height: 1.5;}
+/* number tiles */
+.bt-stats {display: flex; flex-wrap: wrap; gap: 12px;}
+.bt-stat {flex: 1 1 150px; background: #0c0c0e; border: 1px solid #1d1d22; border-radius: 12px; padding: 14px 16px;}
+.bt-stat .k {font-size: 13px; color: #8a8a93;}
+.bt-stat .v {font-size: 28px; font-weight: 600; letter-spacing: -0.02em; margin-top: 4px;}
+.bt-stat .s {font-size: 12px; color: #6b6b74; margin-top: 2px;}
+
+/* label / value rows */
+.bt-row {display: flex; flex-wrap: wrap; gap: 4px 24px; padding: 11px 0; border-top: 1px solid #1d1d22;}
+.bt-row:first-child {border-top: 0; padding-top: 2px;}
+.bt-row .k {flex: 0 0 180px; font-size: 13px; color: #8a8a93; padding-top: 2px;}
+.bt-row .v {flex: 1 1 260px; font-size: 15px; line-height: 1.5;}
+.bt-muted {color: #8a8a93;}
+
+/* simple tables */
+.bt-table {width: 100%; border-collapse: collapse; font-size: 14px;}
+.bt-table th {text-align: left; font-weight: 500; font-size: 12px; color: #8a8a93; padding: 0 12px 10px 0; border-bottom: 1px solid #222227; white-space: nowrap;}
+.bt-table td {padding: 12px 12px 12px 0; border-bottom: 1px solid #1a1a1f; vertical-align: top;}
+.bt-table tr:last-child td {border-bottom: 0;}
+.bt-table, .bt-table th, .bt-table td, .bt-table tr {border-left: 0 !important; border-right: 0 !important; border-top: 0 !important; background: transparent !important;}
+.bt-table td.num, .bt-table th.num {text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;}
+.bt-table .rank {font-family: 'JetBrains Mono', monospace; color: #6b6b74; width: 28px;}
+.bt-table .name {font-weight: 600;}
+.bt-table .set {color: #8a8a93; font-size: 13px; margin-top: 3px;}
+.bt-wrap {overflow-x: auto;}
+.bt-pill {display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap;}
 
 /* widgets */
-label[data-testid="stWidgetLabel"] p {font-family: 'JetBrains Mono', monospace; font-size: 11px !important; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8a93;}
-[data-testid="stMetricLabel"] p {font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #8a8a93;}
-.stButton button, .stDownloadButton button {font-family: 'JetBrains Mono', monospace; letter-spacing: 0.1em; text-transform: uppercase; font-size: 12px; padding: 0.55rem 1.3rem;}
-[data-testid="stExpander"] details {background: #101012; border: 1px solid #26262b; border-radius: 14px;}
-[data-testid="stCaptionContainer"] {color: #7c7c86;}
-
-span[data-baseweb="tag"] {background: #0e0e10 !important; border: 1px solid #26262b; color: #4aa3ff !important;
-                          font-family: 'JetBrains Mono', monospace; font-size: 12px;}
-span[data-baseweb="tag"] svg {color: #8a8a93;}
-
-/* top navigation as pills */
-header[data-testid="stHeader"] {background: rgba(10,10,11,0.85); backdrop-filter: blur(8px); border-bottom: 1px solid #202024;}
-header [data-testid="stTopNavLink"], header a[href] {font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;}
+label[data-testid="stWidgetLabel"] p {font-size: 13px !important; color: #8a8a93;}
+.stButton button {font-weight: 600; padding: 0.5rem 1.4rem;}
+[data-testid="stExpander"] details {background: #101012; border: 1px solid #222227; border-radius: 16px;}
+[data-testid="stCaptionContainer"] {color: #6b6b74;}
+span[data-baseweb="tag"] {background: #1a1a1f !important; color: #f2f2f3 !important;}
+header[data-testid="stHeader"] {background: rgba(10,10,11,0.9); backdrop-filter: blur(8px); border-bottom: 1px solid #1d1d22;}
 </style>
 """
 
@@ -69,32 +75,34 @@ def _html(s):
     st.markdown(str(s).replace("$", "&#36;"), unsafe_allow_html=True)
 
 
+def esc(s):
+    return _h.escape(str(s))
+
+
 def style():
     st.markdown(CSS, unsafe_allow_html=True)
 
 
-def header(title, sub, pills=()):
-    """Big centered title like the journal. pills: [(text, color)]."""
-    p = "".join(f'<span class="bt-pill" style="color:{c}">{t}</span>' for t, c in pills)
-    st.markdown(
-        f'<div class="bt-head"><h1>{title}</h1><div class="sub">{sub}</div>'
-        + (f'<div class="bt-pills">{p}</div>' if p else "")
-        + "</div>",
-        unsafe_allow_html=True,
-    )
+def header(title, sub="", pills=()):
+    _html(f'<div class="bt-head"><h1>{title}</h1>' + (f'<div class="sub">{sub}</div>' if sub else "") + "</div>")
+
+
+def section(title, hint="", number=""):
+    n = f'<span class="n">{number}</span>' if number else ""
+    _html(f'<div class="bt-sec"><div class="t">{n}{title}</div><div class="h">{hint}</div></div>')
 
 
 @contextmanager
-def card(label, tag="", color=BLUE, key=None):
-    """A journal-style window card. Everything inside the `with` goes in the card."""
-    with st.container(key=f"card_{key or label.lower().replace(' ', '_')}"):
-        st.markdown(
-            '<div class="bt-bar"><div class="l"><div class="bt-dots"><i style="background:#ff5f57"></i>'
-            '<i style="background:#febc2e"></i><i style="background:#28c840"></i></div>'
-            f'<div class="bt-label">{label}</div></div><div class="bt-tag" style="color:{color}">{tag}</div></div>',
-            unsafe_allow_html=True,
-        )
+def card(title, hint="", color=None, key=None, number=""):
+    """A section box. Everything inside the `with` goes in it."""
+    with st.container(key=f"card_{key or title.lower().replace(' ', '_')}"):
+        section(title, hint, number)
         yield
+
+
+def pill(verdict):
+    c = VERDICT_COLORS.get(verdict, MUTED)
+    return f'<span class="bt-pill" style="color:{c}; background:{c}1f">{VERDICT_WORDS.get(verdict, verdict)}</span>'
 
 
 def stats(items):
@@ -109,15 +117,58 @@ def stats(items):
 
 
 def rows(items):
-    """items: [(label, html)] as journal key/value rows."""
+    """items: [(label, html)] as label / value rows."""
     _html("".join(f'<div class="bt-row"><div class="k">{k}</div><div class="v">{v}</div></div>' for k, v in items))
 
 
-def plot_layout(fig, height=380):
+def table(headers, body, num_cols=()):
+    """A plain HTML table. headers: list of str; body: list of rows (lists of html); num_cols: right-aligned columns."""
+    th = "".join(f'<th class="{"num" if i in num_cols else ""}">{h}</th>' for i, h in enumerate(headers))
+    tr = "".join(
+        "<tr>" + "".join(f'<td class="{"num" if i in num_cols else ""}">{v}</td>' for i, v in enumerate(r)) + "</tr>"
+        for r in body
+    )
+    _html(f'<div class="bt-wrap"><table class="bt-table"><thead><tr>{th}</tr></thead><tbody>{tr}</tbody></table></div>')
+
+
+def plot_layout(fig, height=360):
     fig.update_layout(
-        height=height, margin=dict(l=0, r=0, t=30, b=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        height=height, margin=dict(l=0, r=0, t=24, b=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font=dict(family="Geist, system-ui, sans-serif", color=MUTED, size=12),
         xaxis=dict(showgrid=False, linecolor=LINE), yaxis=dict(gridcolor=LINE, zeroline=False),
-        hoverlabel=dict(bgcolor="#101012", bordercolor="#26262b", font=dict(color=TEXT, family="JetBrains Mono")),
+        hoverlabel=dict(bgcolor="#101012", bordercolor="#26262b", font=dict(color=TEXT)),
     )
     return fig
+
+
+# ---- plain-English settings ----------------------------------------------------
+_WORDS = {
+    "hours": {"ny": "NY session", "london_ny": "London + NY", "all": "all hours"},
+    "stop": {"swing": "swing stop", "body": "body stop"},
+    "setup": {"erl": "ERL (swing sweep)", "irl": "IRL (FVG)"},
+    "side": {"both": "longs + shorts", "long": "longs only", "short": "shorts only"},
+}
+
+
+def _word(k, v):
+    if k in _WORDS and v in _WORDS[k]:
+        return _WORDS[k][v]
+    if k == "smt":
+        return "no SMT" if v in ("none", False) else ("SMT" if v is True else f"SMT {str(v).upper()}")
+    if k == "psp":
+        return "PSP" if v else "no PSP"
+    if k == "target":
+        return "target C1 range" if v == "range" else f"{v} target"
+    if k == "lookback":
+        return f"last {v}h"
+    if k == "max_wick":
+        return "any sweep size" if v >= 1 else f"sweep ≤ {v:.0%} of C1"
+    if k == "first_hour":
+        return "first hour only" if v else "first 3 hours"
+    if k == "tf":
+        return f"{v}-min chart"
+    return f"{k.replace('_', ' ')} {v}"
+
+
+def settings_text(params: dict) -> str:
+    return " · ".join(_word(k, v) for k, v in params.items())

@@ -16,7 +16,7 @@ from app_pages import ui
 JOB = "backtest"
 TASK = "Backtester nightly"
 
-ui.header("Run", "Pick → Start → Sleep", [("Your strategies", ui.BLUE), ("Prop rules", ui.AMBER), ("Every night", ui.GREEN)])
+ui.header("Run", "Pick what to test and press Start. It keeps running if you close the browser tab.")
 
 missing = sorted({i.data for i in INSTRUMENTS.values() if not (DATA_DIR / f"{i.data}_1m.parquet").exists()})
 if missing:
