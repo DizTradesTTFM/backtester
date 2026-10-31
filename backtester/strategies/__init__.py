@@ -2,10 +2,30 @@
 
 import itertools
 
-from . import channel_breakout, ema_trend, magic_1h, magic_4h1h, orb, qj_o01_sma_cross, quantjourney, rsi_reversal, time_momentum, vwap_fade
+from . import channel_breakout, ema_trend, orb, qj_o01_sma_cross, quantjourney, rsi_reversal, time_momentum, vwap_fade
 
-_MODULES = [orb, vwap_fade, ema_trend, rsi_reversal, channel_breakout, time_momentum, magic_4h1h, magic_1h, qj_o01_sma_cross, *quantjourney.PORTS]
+_MODULES = [orb, vwap_fade, ema_trend, rsi_reversal, channel_breakout, time_momentum, qj_o01_sma_cross, *quantjourney.PORTS]
 STRATEGIES = {m.NAME: m for m in _MODULES}
+# Capo's strategies (the QuantJourney ports). The built-in examples stay in code but are not run by default.
+MINE = [n for n in STRATEGIES if getattr(STRATEGIES[n], "MINE", False)]
+
+_SMALL = {"rsi", "sma", "ema", "macd", "oco"}
+
+
+def title(name: str) -> str:
+    """qj_o02_rsi_reversion -> 'RSI Reversion' (short display name)."""
+    parts = name.split("_")
+    if parts[0] == "qj" and len(parts) > 2:
+        parts = parts[2:]
+    return " ".join(p.upper() if p in _SMALL else (p if p[0].isdigit() else p.capitalize()) for p in parts)
+
+
+def tag(name: str) -> str:
+    """qj_o02_... -> 'Orders #2', qj_w07_... -> 'Weights #7'."""
+    parts = name.split("_")
+    if parts[0] == "qj" and len(parts) > 1 and parts[1][1:].isdigit():
+        return ("Orders" if parts[1][0] == "o" else "Weights") + f" #{int(parts[1][1:])}"
+    return "Built-in"
 
 
 def get_strategy(name: str):

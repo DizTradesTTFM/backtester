@@ -14,8 +14,9 @@ from backtester.engine import run_backtest
 from backtester.evaluate import EvalConfig, fixed_risk, trade_stops
 from backtester.instruments import get_instrument
 from backtester.prop import BOTS_ALLOWED, PROP_PRESETS
+from backtester.evaluate import SCORING_VERSION
 from backtester.runner import RESULTS_DB
-from backtester.strategies import STRATEGIES
+from backtester.strategies import STRATEGIES, title
 from app_pages import ui
 
 
@@ -78,7 +79,7 @@ def money_colored(v):
 
 
 def label(r):
-    return f"{r.instrument} · {r.strategy}"
+    return f"{title(r.strategy)} · {r.instrument}"
 
 
 def pf(v):
@@ -93,17 +94,43 @@ def firm_name(k):
     return PROP_PRESETS[k].name if k in PROP_PRESETS else str(k)
 
 
+def firm_html(k):
+    return f"{ui.logo(k)}{ui.esc(firm_name(k))}" if k else "–"
+
+
+def delete_runs(names):
+    with sqlite3.connect(RESULTS_DB) as con:
+        for r in names:
+            con.execute("DELETE FROM results WHERE run=?", (r,))
+            con.execute("DELETE FROM runs WHERE run=?", (r,))
+    load_runs.clear()
+    load_results.clear()
+
+
 runs = load_runs()
-if runs.empty:
-    ui.header("Results", "Nothing tested yet.")
-    st.info("Go to **Run** and press Start. Results show up here when it's done.")
+current = runs[runs["run"].str.contains(f"_v{SCORING_VERSION}")] if not runs.empty else runs
+old = runs[~runs["run"].isin(current["run"])] if not runs.empty else runs
+ui.header("Results", "Every number is on new data the strategy never saw.")
+if len(old):
+    with st.expander(f"Clean up: {len(old)} old test batch{'es' if len(old) > 1 else ''} from earlier versions"):
+        st.caption("These were scored with older rules (magic strategies, one prop firm). They can't be compared to new runs.")
+        if st.button("Delete old batches", type="primary"):
+            delete_runs(old["run"])
+            st.rerun()
+if current.empty:
+    st.info("No tests with the new version yet. Go to **Run** and press Start.")
     st.stop()
 
-# ---- header + filters ----------------------------------------------------------
-ui.header("Results", "What worked, what didn't, and why. Every number is on new data the strategy never saw while "
-          "being picked, with the same dollar risk on every trade.")
-c1, c2, c3, c4 = st.columns([2, 1, 1, 1.3])
-run = c1.selectbox("Test batch", runs["run"], format_func=lambda r: f"{runs.set_index('run').loc[r, 'started'][:16].replace('T', ' ')}  ·  {r}")
+
+def batch_label(r):
+    i = current.set_index("run").loc[r]
+    cfg = json.loads(i["config"])
+    when = pd.Timestamp(i["started"]).strftime("%b %d, %H:%M")
+    return f"{when} · {len(cfg.get('strategies', []))} strategies · {len(cfg.get('firms', {}))} accounts"
+
+
+c1, c2, c3, c4 = st.columns([2, 1.3, 0.8, 1.3])
+run = c1.selectbox("Test batch", current["run"], format_func=batch_label)
 run_info = runs.set_index("run").loc[run]
 config = json.loads(run_info["config"])
 all_df = load_results(run)
@@ -111,9 +138,7 @@ if all_df.empty:
     st.warning("This batch has no finished backtests yet.")
     st.stop()
 firms = list(config.get("firms", {}))
-if not firms:
-    st.warning("This batch is from an older version (one prop firm, no fixed risk). Press Start on the Run page for a new one.")
-strat_pick = c2.selectbox("Strategy", ["All"] + sorted(all_df.strategy.unique()))
+strat_pick = c2.selectbox("Strategy", ["All"] + sorted(all_df.strategy.unique()), format_func=lambda n: n if n == "All" else title(n))
 inst_pick = c3.selectbox("Market", ["All"] + sorted(all_df.instrument.unique()))
 firm_pick = c4.selectbox("Prop firm", ["best"] + firms, format_func=lambda k: "Best firm for each setup" if k == "best" else firm_name(k))
 df = all_df[((all_df.strategy == strat_pick) | (strat_pick == "All")) & ((all_df.instrument == inst_pick) | (inst_pick == "All"))].copy()
@@ -170,18 +195,16 @@ with ui.card("Strategies compared", "best setup of each, on new data", key="comp
     for (strat, inst), g in df.groupby(["strategy", "instrument"]):
         b = g.sort_values(["rank_key", "oos_prop_pass_rate", "oos_profit_factor"], ascending=[True, False, False]).iloc[0]
         body.append((b.rank_key, -(b.oos_prop_pass_rate if pd.notna(b.oos_prop_pass_rate) else -1), [
-            f'<div class="name">{ui.esc(strat)}</div><div class="set">{inst} · {len(g):,} setups</div>',
+            f'<div class="name">{ui.esc(title(strat))}</div><div class="set">{inst} · {len(g):,} setups</div>',
             ui.pill(b.verdict),
             pct(b.oos_win_rate), pf(b.oos_profit_factor), days(b.oos_prop_days_to_pass),
             pct(b.oos_prop_pass_rate), pct(b.oos_prop_fail_rate),
-            ui.esc(firm_name(b.best_firm)) if b.best_firm else "–",
+            firm_html(b.best_firm),
             ui.esc(g.loc[g.verdict == "FAIL", "problem"].mode().iat[0] if (g.verdict == "FAIL").any() else "–"),
         ]))
     body.sort(key=lambda x: (x[0], x[1]))
     ui.table(["Strategy", "Result", *KEY_HEADERS, "Prop pass", "Blow-up", "Firm", "Main problem"],
              [r for _, _, r in body], num_cols=(2, 3, 4, 5, 6))
-    ui._html('<div class="bt-muted" style="font-size:13px">Days to pass = median trading days to hit the target when it '
-             'passed. Prop pass / blow-up = share of simulated evaluations started on different days that passed or failed.</div>')
 
 # ---- 3. best setups ------------------------------------------------------------
 # settings that made no difference give identical results: show each distinct result once
@@ -195,7 +218,7 @@ with ui.card("Top 5 setups", "ranked by prop pass rate on new data", key="top", 
             ui.pill(r.verdict),
             pct(r.oos_win_rate), pf(r.oos_profit_factor), days(r.oos_prop_days_to_pass),
             pct(r.oos_prop_pass_rate), pct(r.oos_prop_fail_rate),
-            ui.esc(firm_name(r.best_firm)) if r.best_firm else "–",
+            firm_html(r.best_firm),
         ] for i, (_, r) in enumerate(top.iterrows())],
         num_cols=(3, 4, 5, 6, 7),
     )
@@ -236,7 +259,7 @@ with ui.card("Look closer", "every prop firm, equity curve and every trade", key
         for k in sorted(firms, key=lambda k: -(row.get(f"f_{k}_oos_pass") if pd.notna(row.get(f"f_{k}_oos_pass")) else -1)):
             r_ = PROP_PRESETS.get(k)
             firm_rows.append([
-                f'<div class="name">{ui.esc(firm_name(k))} '
+                f'<div class="name">{firm_html(k)} '
                 + (f'<span class="bt-pill" style="color:{ui.GREEN};background:{ui.GREEN}1f">bots OK</span>' if k in BOTS_ALLOWED
                    else f'<span class="bt-pill" style="color:{ui.PINK};background:{ui.PINK}1f">no bots</span>') + '</div>'
                 + (f'<div class="set">{"FUNDED · pass = first payout · " if r_.stage == "funded" else "Eval · "}'

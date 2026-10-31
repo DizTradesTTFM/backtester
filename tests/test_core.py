@@ -224,59 +224,6 @@ def hourly_bars(candles, start="2024-01-02 06:00"):
     return bars_from_frame(df, "ES"), df
 
 
-def test_magic_4h1h_long_on_sweep_and_closure(tmp_path, monkeypatch):
-    import backtester.data as data_mod
-
-    # 06:00-10:00 is the C1 4H candle (range 100-110). At 10:00 the first 1H candle of the next 4H candle
-    # dips to 98 (sweeps 100), closes bullish at 104: enter at 11:00 open, stop 6 below, range target 110.
-    c1 = [(105, 108, 101, 106), (106, 110, 100, 102), (102, 107, 101, 105), (105, 109, 103, 104)]
-    c2 = [(103, 105, 98, 104), (104, 112, 104, 111), (111, 111, 110, 110)]
-    bars, df = hourly_bars(c1 + c2)
-    p = dict(hours="ny", max_wick=0.25, first_hour=True, smt="none", psp=False, stop="swing", target="range")
-    sig = STRATEGIES["magic_4h1h"].generate(bars, p)
-    fired = np.flatnonzero(sig.entry)
-    assert list(fired) == [4 * 60 + 59] and sig.entry[fired[0]] == 1
-    assert sig.stop_pts[fired[0]] == 6 and sig.target_pts[fired[0]] == 6
-    # sweep too deep for a 10% wick limit
-    assert not STRATEGIES["magic_4h1h"].generate(bars, {**p, "max_wick": 0.1}).entry.any()
-
-    # SMT: the partner (NQ) also took its 4H low -> no divergence -> no trade; partner held its low -> trade
-    monkeypatch.setattr(data_mod, "DATA_DIR", tmp_path)
-    assert STRATEGIES["magic_4h1h"].generate(bars, {**p, "smt": "4h"}) is None  # no NQ data yet
-    df.to_parquet(tmp_path / "NQ_1m.parquet")
-    assert not STRATEGIES["magic_4h1h"].generate(bars, {**p, "smt": "4h"}).entry.any()
-    _, held = hourly_bars(c1 + [(103, 105, 100.5, 104)] + c2[1:])
-    held.to_parquet(tmp_path / "NQ_1m.parquet")
-    assert STRATEGIES["magic_4h1h"].generate(bars, {**p, "smt": "4h"}).entry.any()
-    # PSP: partner's 1H candle closed bullish too, so no PSP
-    assert not STRATEGIES["magic_4h1h"].generate(bars, {**p, "psp": True}).entry.any()
-
-
-def test_magic_1h_erl_short():
-    # swing high 110 over the last 3 hours gets swept to 112, candle closes bearish back under: short at next open
-    c = [(100, 105, 99, 104), (104, 110, 103, 108), (108, 109, 105, 106), (106, 112, 104, 105), (105, 106, 100, 101)]
-    bars, _ = hourly_bars(c, start="2024-01-02 10:00")
-    p = dict(setup="erl", lookback=3, hours="ny", smt=False, psp=False, stop="swing", target="2R")
-    sig = STRATEGIES["magic_1h"].generate(bars, p)
-    fired = np.flatnonzero(sig.entry)
-    assert list(fired) == [3 * 60 + 59] and sig.entry[fired[0]] == -1
-    assert sig.stop_pts[fired[0]] == 7 and sig.target_pts[fired[0]] == 14
-
-
-def test_magic_body_stop_needs_body_beyond_half_the_opposing_run():
-    from backtester.strategies._magic import stop_distance
-
-    # two setups, each a C1/C2 pair; protected low 100, close 110. Opposing run: high 120 -> low 100, so 50% = 110.
-    o = np.array([115.0, 104.0, 115.0, 112.0])
-    c = np.array([105.0, 110.0, 112.0, 110.0])
-    low = np.full(4, 100.0)
-    assert stop_distance("swing", o, c, low, np.full(4, 120.0))[1] == 10
-    # lowest body at the swing is 104 (C2 open), below the 50% level -> refined stop 6
-    assert stop_distance("body", o, c, low, np.full(4, 120.0))[1] == 6
-    # lowest body 110 is not beyond 50% when the run is only 100..110 (50% = 105) -> keep swing stop 10
-    assert stop_distance("body", o, c, low, np.full(4, 110.0))[3] == 10
-
-
 def test_engine_limit_stop_entries_trail_hold_and_signal_exit():
     flat = (100, 100, 100, 100)
     # limit buy at 98: bar 1 low 99 no fill, bar 2 low 97 fills at 98 (no slippage)

@@ -59,6 +59,14 @@ div[class*="st-key-card_"] {background: #101012; border: 1px solid #222227; bord
 .bt-wrap {overflow-x: auto;}
 .bt-pill {display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap;}
 
+/* picker tiles: st.container(key="tile_...") */
+div[class*="st-key-tile_"] {background: #0c0c0e; border: 1px solid #1d1d22; border-radius: 12px; padding: 10px 14px 8px; gap: 0;}
+div[class*="st-key-tile_"] [data-testid="stCheckbox"] p {font-weight: 600; font-size: 15px;}
+div[class*="st-key-tile_f_"] {gap: 0.6rem; padding: 12px 16px 6px;}
+.bt-tile-sub {font-size: 12px; color: #6b6b74; margin: -4px 0 2px 28px;}
+.bt-brand {display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; margin: 4px 0 14px;}
+.bt-brand img {margin-right: 0 !important;}
+
 /* widgets */
 label[data-testid="stWidgetLabel"] p {font-size: 13px !important; color: #8a8a93;}
 .stButton button {font-weight: 600; padding: 0.5rem 1.4rem;}
@@ -172,3 +180,39 @@ def _word(k, v):
 
 def settings_text(params: dict) -> str:
     return " · ".join(_word(k, v) for k, v in params.items())
+
+
+# ---- prop firm brands + logos --------------------------------------------------
+# Logos load from each firm's own website icon (needs internet; falls back to the name only).
+BRANDS = {
+    "fundednext": ("FundedNext", "fundednext.com"),
+    "topstep": ("Topstep", "topstep.com"),
+    "lucid": ("Lucid Trading", "lucidtrading.com"),
+    "mffu": ("MyFundedFutures", "myfundedfutures.com"),
+    "tradeify": ("Tradeify", "tradeify.co"),
+    "apex": ("Apex Trader Funding", "apextraderfunding.com"),
+}
+
+
+def brand(key: str) -> str:
+    return key.split("_")[0]
+
+
+def logo_url(key: str, size=64) -> str:
+    dom = BRANDS.get(brand(key), ("", ""))[1]
+    return f"https://www.google.com/s2/favicons?domain={dom}&sz={size}" if dom else ""
+
+
+def logo(key: str, px=20) -> str:
+    u = logo_url(key)
+    return (f'<img src="{u}" width="{px}" height="{px}" style="border-radius:5px;vertical-align:-4px;margin-right:8px;'
+            f'background:#fff">') if u else ""
+
+
+def account_label(rules) -> str:
+    """'Rapid Pro 25K · Eval' style short label, without the brand name."""
+    name = rules.name
+    for b, _ in BRANDS.values():
+        name = name.replace(b, "")
+    name = name.replace("MyFundedFutures", "").replace("Lucid", "").replace("Apex", "").replace("Funded (XFA)", "").replace("Funded", "")
+    return " ".join(name.split()) or rules.name

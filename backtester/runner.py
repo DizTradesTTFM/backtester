@@ -23,7 +23,7 @@ from .data import DATA_DIR, load_bars
 from .evaluate import SCORING_VERSION, EvalConfig, evaluate, verdict
 from .instruments import get_instrument
 from .prop import DEFAULT_FIRMS, PROP_PRESETS
-from .strategies import STRATEGIES, get_strategy, param_combos
+from .strategies import MINE, STRATEGIES, get_strategy, param_combos
 
 RESULTS_DB = Path(__file__).resolve().parent.parent / "results" / "results.db"
 
@@ -190,13 +190,13 @@ def main():
     ap.add_argument("--slippage", type=float, default=1.0, help="slippage in ticks per side")
     args = ap.parse_args()
 
-    strategies = sorted(STRATEGIES) if args.strategies == ["all"] else args.strategies
+    strategies = sorted(MINE) if args.strategies == ["all"] else args.strategies
     firms = DEFAULT_FIRMS if args.firms == ["all"] else args.firms
     name = args.run or default_run_name(args.instruments)
     if not args.run and set(firms) != set(DEFAULT_FIRMS):
         name += "_firms" + hashlib.sha1(" ".join(sorted(firms)).encode()).hexdigest()[:4]
-    if not args.run and set(strategies) != set(STRATEGIES):
-        name += "_" + "+".join(sorted(strategies))  # its own batch, so the luck bar matches what was tested
+    if not args.run and set(strategies) != set(MINE):
+        name += "_s" + hashlib.sha1(" ".join(sorted(strategies)).encode()).hexdigest()[:4]  # its own batch, so the luck bar matches what was tested
     run(name, args.instruments, strategies, firms, args.workers, EvalConfig(slippage_ticks=args.slippage))
 
 
