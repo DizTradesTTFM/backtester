@@ -107,12 +107,14 @@ firms = [k for k in firm_keys if st.session_state[f"f_{k}"]]
 
 # ---- 03 start ----------------------------------------------------------------
 with ui.card("Start", "", key="pick_start", number="03"):
-    c1, c2, c3 = st.columns([3, 1.4, 1])
+    c1, c2, c3, c4 = st.columns([2.6, 1.3, 1.3, 1])
     insts = c1.multiselect("Markets", list(MARKETS), default=list(MARKETS), format_func=MARKETS.get)
     years = c2.selectbox("Data to test", [1, 2, 3, 5, 0], index=2,
                          format_func=lambda y: "All history" if y == 0 else f"Last {y} year{'s' if y > 1 else ''}",
                          help="Last 30% is kept as new data the strategy never sees while being picked.")
-    slip = c3.number_input("Slippage (ticks)", 0.0, 5.0, 1.0, 0.5)
+    days_lim = c3.selectbox("Must pass within", [0, 15, 20, 30], format_func=lambda d: "Firm's rules (60 days)" if d == 0
+                            else f"{d} trading days (~{d // 5} weeks)")
+    slip = c4.number_input("Slippage (ticks)", 0.0, 5.0, 1.0, 0.5)
     n = len(insts) * sum(len(param_combos(STRATEGIES[s])) for s in strats)
     ui.stats([
         ("Strategies", len(strats), "", ui.BLUE),
@@ -122,7 +124,7 @@ with ui.card("Start", "", key="pick_start", number="03"):
     if st.button("Start", type="primary", width="stretch",
                  disabled=busy or not insts or not strats or not firms or bool(missing)):
         jobs.start(JOB, ["-m", "backtester.runner", "--instruments", *insts, "--strategies", *strats,
-                         "--firms", *firms, "--years", str(years), "--slippage", str(slip)])
+                         "--firms", *firms, "--years", str(years), "--max-days", str(days_lim), "--slippage", str(slip)])
         st.rerun()
 
 if sys.platform == "win32":

@@ -132,6 +132,9 @@ def batch_label(r):
     cfg = json.loads(i["config"])
     when = pd.Timestamp(i["started"]).strftime("%b %d, %H:%M")
     span = f"last {cfg['years']:g} yrs" if cfg.get("years") else "all data"
+    md = {f.get("max_days") for f in cfg.get("firms", {}).values()}
+    if len(md) == 1 and md != {60} and None not in md:
+        span += f" · pass within {md.pop()} days"
     return f"{when} · {len(cfg.get('strategies', []))} strategies · {len(cfg.get('firms', {}))} accounts · {span}"
 
 

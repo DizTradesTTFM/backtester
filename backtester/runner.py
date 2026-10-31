@@ -189,17 +189,25 @@ def main():
     ap.add_argument("--strategies", nargs="+", default=["all"])
     ap.add_argument("--firms", nargs="+", default=["all"], help="prop firm rule sets to test against (default: every EOD account)")
     ap.add_argument("--workers", type=int, default=None, help="CPU cores to use (default: all but one)")
+    ap.add_argument("--max-days", type=int, default=0,
+                    help="override every firm's time limit in trading days (e.g. 15 = must pass within ~3 weeks)")
     ap.add_argument("--years", type=float, default=3, help="only test the most recent N years of data (0 = all)")
     ap.add_argument("--slippage", type=float, default=1.0, help="slippage in ticks per side")
     args = ap.parse_args()
 
     strategies = sorted(MINE) if args.strategies == ["all"] else args.strategies
     firms = DEFAULT_FIRMS if args.firms == ["all"] else args.firms
+    if args.max_days:
+        import dataclasses
+        for k in firms:
+            PROP_PRESETS[k] = dataclasses.replace(PROP_PRESETS[k], max_days=args.max_days)
     name = args.run or default_run_name(args.instruments)
     if not args.run and set(firms) != set(DEFAULT_FIRMS):
         name += "_firms" + hashlib.sha1(" ".join(sorted(firms)).encode()).hexdigest()[:4]
     if not args.run and set(strategies) != set(MINE):
         name += "_s" + hashlib.sha1(" ".join(sorted(strategies)).encode()).hexdigest()[:4]  # its own batch, so the luck bar matches what was tested
+    if not args.run and args.max_days:
+        name += f"_d{args.max_days}"
     if not args.run and args.years:
         name += f"_y{args.years:g}"
     run(name, args.instruments, strategies, firms, args.workers, EvalConfig(slippage_ticks=args.slippage), years=args.years)
