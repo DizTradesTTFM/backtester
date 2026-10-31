@@ -60,7 +60,7 @@ def _run_job(job):
     sig = get_strategy(strat_name).generate(bars, params)
     if sig is None:
         return job, None
-    row = evaluate(bars, sig, inst, _CTX["rules"], _CTX["cfg"], _CTX["n_trials"])
+    row = evaluate(bars, sig, inst, _CTX["firms"], _CTX["cfg"], _CTX["n_trials"])
     return job, row
 
 
@@ -123,9 +123,9 @@ def build_jobs(instruments, strategies):
     return jobs
 
 
-def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg=EvalConfig(), data_paths=None, db_path=RESULTS_DB):
+def run(run_name, instruments, strategies, firms=None, workers=None, cfg=EvalConfig(), data_paths=None, db_path=RESULTS_DB):
     con = connect(db_path)
-    rules = PROP_PRESETS[prop]
+    firms = {k: PROP_PRESETS[k] for k in (firms or PROP_PRESETS)}
     jobs = build_jobs(instruments, strategies)
 
     # the luck bar depends on how many combos were tried per instrument
@@ -136,7 +136,7 @@ def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg
     }
     todo = [j for j in jobs if (j[0], j[1], json.dumps(j[2], sort_keys=True)) not in done]
 
-    config = {"instruments": instruments, "strategies": strategies, "prop": rules.to_dict(), "eval": cfg.__dict__}
+    config = {"instruments": instruments, "strategies": strategies, "firms": {k: r.to_dict() for k, r in firms.items()}, "eval": cfg.__dict__}
     con.execute(
         "INSERT OR IGNORE INTO runs (run, started, config, n_jobs) VALUES (?, ?, ?, ?)",
         (run_name, datetime.now().isoformat(timespec="seconds"), json.dumps(config), len(jobs)),
@@ -145,7 +145,7 @@ def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg
     con.commit()
     print(f"Run '{run_name}': {len(jobs)} backtests total, {len(done)} already done, {len(todo)} to go.")
     if todo:
-        _run_todo(con, run_name, todo, instruments, rules, cfg, n_trials, workers, data_paths)
+        _run_todo(con, run_name, todo, instruments, firms, cfg, n_trials, workers, data_paths)
     finalize(con, run_name, cfg)
     con.execute("UPDATE runs SET finished=? WHERE run=?", (datetime.now().isoformat(timespec="seconds"), run_name))
     con.commit()
@@ -153,11 +153,11 @@ def run(run_name, instruments, strategies, prop="topstep_50k", workers=None, cfg
     print(f"Done. {counts.get('PASS', 0)} passed every filter, {counts.get('WATCH', 0)} on the watch list. See the Results page.")
 
 
-def _run_todo(con, run_name, todo, instruments, rules, cfg, n_trials, workers, data_paths):
+def _run_todo(con, run_name, todo, instruments, firms, cfg, n_trials, workers, data_paths):
     needed = sorted({get_instrument(s).data for s in instruments})
     data_paths = data_paths or {s: None for s in needed}
     workers = workers or max(1, (os.cpu_count() or 2) - 1)
-    ctx = {"rules": rules, "cfg": cfg, "n_trials": n_trials}
+    ctx = {"firms": firms, "cfg": cfg, "n_trials": n_trials}
 
     t0 = time.time()
     finished = 0
@@ -183,18 +183,21 @@ def _run_todo(con, run_name, todo, instruments, rules, cfg, n_trials, workers, d
 def main():
     ap = argparse.ArgumentParser(description="Run thousands of backtests and save the results.")
     ap.add_argument("--run", default=None, help="batch name (default: based on the data files). Re-using a name resumes it")
-    ap.add_argument("--instruments", nargs="+", default=["ES", "NQ", "MES", "MNQ"])
+    ap.add_argument("--instruments", nargs="+", default=["ES", "NQ"])
     ap.add_argument("--strategies", nargs="+", default=["all"])
-    ap.add_argument("--prop", default="topstep_50k", choices=sorted(PROP_PRESETS))
+    ap.add_argument("--firms", nargs="+", default=["all"], help="prop firm rule sets to test against (default: all)")
     ap.add_argument("--workers", type=int, default=None, help="CPU cores to use (default: all but one)")
     ap.add_argument("--slippage", type=float, default=1.0, help="slippage in ticks per side")
     args = ap.parse_args()
 
     strategies = sorted(STRATEGIES) if args.strategies == ["all"] else args.strategies
-    name = args.run or default_run_name(args.instruments) + ("" if args.prop == "topstep_50k" else f"_{args.prop}")
+    firms = list(PROP_PRESETS) if args.firms == ["all"] else args.firms
+    name = args.run or default_run_name(args.instruments)
+    if not args.run and set(firms) != set(PROP_PRESETS):
+        name += "_firms" + hashlib.sha1(" ".join(sorted(firms)).encode()).hexdigest()[:4]
     if not args.run and set(strategies) != set(STRATEGIES):
         name += "_" + "+".join(sorted(strategies))  # its own batch, so the luck bar matches what was tested
-    run(name, args.instruments, strategies, args.prop, args.workers, EvalConfig(slippage_ticks=args.slippage))
+    run(name, args.instruments, strategies, firms, args.workers, EvalConfig(slippage_ticks=args.slippage))
 
 
 if __name__ == "__main__":

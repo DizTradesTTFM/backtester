@@ -3,7 +3,7 @@
 Takes a strategy's trades and replays them as if you had started an evaluation
 on many different start days. Reports how often it passes, fails, or runs out of time.
 
-Rule numbers below are EXAMPLES. Check the firm's current rules before trusting results.
+Firm rules change often. Check the firm's current rules before trusting results.
 """
 
 from dataclasses import asdict, dataclass
@@ -19,25 +19,38 @@ class PropRules:
     name: str
     profit_target: float  # dollars of profit needed to pass
     max_loss: float  # trailing max drawdown, dollars
-    trailing: str  # "eod" = trails end-of-day balance highs, "intraday" = trails open equity highs
+    trailing: str  # "eod" = trails end-of-day balance highs, "intraday" = trails balance highs during the day
     daily_loss_limit: float  # 0 = no daily limit
     max_days: int  # trading days allowed before we call it a timeout
     min_days: int = 1  # minimum trading days before a pass counts
     max_minis: int = 5  # position limit in full-size contracts (10 micros = 1 mini)
+    risk: float = 300.0  # dollars risked on every trade (stop distance x contracts)
+    lock_at: float = 0.0  # the trailing floor stops rising here (dollars above the starting balance)
+    dll_fails: bool = False  # True = hitting the daily loss limit fails the account; False = done for the day
+    consistency: float = 0.0  # best day must be at most this share of total profit to pass (0 = no rule)
 
     def to_dict(self):
         return asdict(self)
 
 
+# Rules as published by the firms / review sites in October 2026. Firms change these often: verify before buying.
+# Apex: 30 calendar days ~ 21 trading days. Lucid and Topstep have no time limit; 60 trading days is our cut-off.
 PROP_PRESETS = {
-    # Approximate 50K evaluation-style rules. Verify against the firm's site before relying on them.
-    "topstep_50k": PropRules("Topstep 50K (verify)", 3000.0, 2000.0, "eod", 1000.0, 60, 2),
-    "generic_50k_intraday": PropRules("Generic 50K intraday trailing", 3000.0, 2500.0, "intraday", 0.0, 60, 1),
+    "topstep_50k": PropRules("Topstep 50K", 3000, 2000, "eod", 1000, 60, 2, 5, 300, 0, False, 0.5),
+    "lucid_flex_25k": PropRules("Lucid Flex 25K", 1250, 1000, "eod", 0, 60, 1, 2, 150, 100, False, 0.5),
+    "lucid_pro_25k": PropRules("Lucid Pro 25K", 1250, 1000, "eod", 0, 60, 1, 2, 150, 100, False, 0.0),
+    "lucid_flex_50k": PropRules("Lucid Flex 50K", 3000, 2000, "eod", 0, 60, 1, 4, 300, 100, False, 0.5),
+    "lucid_pro_50k": PropRules("Lucid Pro 50K", 3000, 2000, "eod", 1200, 60, 1, 4, 300, 100, False, 0.0),
+    "apex_25k_eod": PropRules("Apex 25K EOD", 1500, 1000, "eod", 500, 21, 1, 4, 150, 1500, False, 0.0),
+    "apex_25k_intraday": PropRules("Apex 25K Intraday", 1500, 1000, "intraday", 0, 21, 1, 4, 150, 1500, False, 0.0),
+    "apex_50k_eod": PropRules("Apex 50K EOD", 3000, 2000, "eod", 1000, 21, 1, 6, 300, 3000, False, 0.0),
+    "apex_50k_intraday": PropRules("Apex 50K Intraday", 3000, 2000, "intraday", 0, 21, 1, 6, 300, 3000, False, 0.0),
 }
 
 
 @njit(cache=True)
-def _simulate_evals(t_day, pnl, mae, n_days, target, max_loss, intraday_trail, dll, max_days, min_days, step):
+def _simulate_evals(t_day, pnl, mae, n_days, target, max_loss, intraday_trail, dll, max_days, min_days, step,
+                    lock_at, dll_fails, consistency):
     n_starts = (n_days + step - 1) // step
     outcome = np.zeros(n_starts, np.int8)  # 1 pass, -1 fail, 0 timeout/ran out of data
     days_used = np.zeros(n_starts, np.int64)
@@ -52,6 +65,8 @@ def _simulate_evals(t_day, pnl, mae, n_days, target, max_loss, intraday_trail, d
         floor = -max_loss
         cur_day = s
         day_pnl = 0.0
+        best_day = 0.0
+        day_done = False
         traded_days = 0
         last_traded = -1
         res = 0
@@ -60,32 +75,49 @@ def _simulate_evals(t_day, pnl, mae, n_days, target, max_loss, intraday_trail, d
         while j < m and t_day[j] < s + max_days:
             d = t_day[j]
             if d != cur_day:
-                # end of the previous day(s): trail the floor on closing balance, never above start
+                # end of the previous day(s): trail the floor on closing balance, up to the lock level
+                best_day = max(best_day, day_pnl)
                 if not intraday_trail:
                     peak = max(peak, bal)
-                    floor = min(peak - max_loss, 0.0)
+                    floor = min(peak - max_loss, lock_at)
                 cur_day = d
                 day_pnl = 0.0
+                day_done = False
+            if day_done:  # daily loss limit hit earlier today: no more trades
+                j += 1
+                continue
             if d != last_traded:
                 traded_days += 1
                 last_traded = d
-            if bal + mae[j] <= floor or (dll > 0 and day_pnl + mae[j] <= -dll):
+            if bal + mae[j] <= floor:
                 res = -1
                 used = d - s + 1
                 break
+            if dll > 0 and day_pnl + mae[j] <= -dll:
+                if dll_fails:
+                    res = -1
+                    used = d - s + 1
+                    break
+                # the firm flattens you at the daily limit and you are done for the day
+                bal += -dll - day_pnl
+                day_pnl = -dll
+                day_done = True
+                j += 1
+                continue
             bal += pnl[j]
             day_pnl += pnl[j]
             if intraday_trail:
                 peak = max(peak, bal)
-                floor = min(peak - max_loss, 0.0)
-            if bal <= floor or (dll > 0 and day_pnl <= -dll):
+                floor = min(peak - max_loss, lock_at)
+            if bal <= floor:
                 res = -1
                 used = d - s + 1
                 break
             if bal >= target and traded_days >= min_days:
-                res = 1
-                used = d - s + 1
-                break
+                if consistency <= 0 or max(best_day, day_pnl) <= consistency * bal:
+                    res = 1
+                    used = d - s + 1
+                    break
             j += 1
         if res == 0:
             used = max_days
@@ -111,6 +143,9 @@ def evaluate_prop(trades: Trades, n_days: int, rules: PropRules, step: int = 5) 
         rules.max_days,
         rules.min_days,
         step,
+        float(rules.lock_at),
+        rules.dll_fails,
+        float(rules.consistency),
     )
     valid = out != 2
     total = int(valid.sum())

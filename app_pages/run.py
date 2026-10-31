@@ -62,21 +62,22 @@ with ui.card("Status", "Live", ui.GREEN):
 
 with ui.card("What to test", "01 · Setup", ui.BLUE):
     c1, c2 = st.columns(2)
-    insts = c1.multiselect("Contracts", list(INSTRUMENTS), default=list(INSTRUMENTS))
+    names = {"ES": "S&P 500 (ES / MES)", "NQ": "Nasdaq (NQ / MNQ)"}
+    insts = c1.multiselect("Markets (trades are sized in micros)", list(names), default=list(names), format_func=names.get)
     mine = [s for s in sorted(STRATEGIES) if getattr(STRATEGIES[s], "MINE", False)]
     strats = c2.multiselect("Strategies", sorted(STRATEGIES), default=mine or sorted(STRATEGIES))
-    c3, c4 = st.columns(2)
-    presets = sorted(PROP_PRESETS)
-    prop = c3.selectbox("Prop rules", presets, index=presets.index("topstep_50k"), format_func=lambda k: PROP_PRESETS[k].name)
+    c3, c4 = st.columns([3, 1])
+    firms = c3.multiselect("Prop firms (every setup is tested against each)", list(PROP_PRESETS), default=list(PROP_PRESETS),
+                           format_func=lambda k: f"{PROP_PRESETS[k].name} · ${PROP_PRESETS[k].risk:,.0f} risk/trade")
     slip = c4.number_input("Slippage (ticks per side)", 0.0, 5.0, 1.0, 0.5)
 
     n = len(insts) * sum(len(param_combos(STRATEGIES[s])) for s in strats)
     st.caption(f"{n:,} backtests. Finished ones are skipped, so pressing Start again after a stop resumes.")
 
-    if st.button("Start", type="primary", disabled=busy or not insts or not strats or bool(missing)):
+    if st.button("Start", type="primary", disabled=busy or not insts or not strats or not firms or bool(missing)):
         jobs.start(
             JOB,
-            ["-m", "backtester.runner", "--instruments", *insts, "--strategies", *strats, "--prop", prop, "--slippage", str(slip)],
+            ["-m", "backtester.runner", "--instruments", *insts, "--strategies", *strats, "--firms", *firms, "--slippage", str(slip)],
         )
         st.rerun()
 

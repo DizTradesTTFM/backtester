@@ -13,13 +13,13 @@ import numpy as np
 from numba import njit
 
 from .engine import Trades, run_backtest
-from .instruments import Instrument
+from .instruments import Instrument, get_instrument
 from .metrics import compute_metrics
 from .prop import PropRules, evaluate_prop
 
 
 # Bump when scoring changes, so the next run starts a fresh batch instead of resuming an old-style one.
-SCORING_VERSION = 5
+SCORING_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -29,9 +29,7 @@ class EvalConfig:
     slippage_ticks: float = 1.0
     qty: int = 1
     min_trades: int = 100  # fewer in-sample trades than this = not enough evidence
-    sizes: tuple = (1, 2, 3, 4, 5, 6, 8, 10)  # contract counts tried for the prop evaluation
-    loss_stops: tuple = (0, 300, 500, 750)  # stop trading for the day after losing this much ($, 0 = off)
-    profit_locks: tuple = (0, 500, 1000, 1500)  # stop trading for the day after making this much ($, 0 = off)
+    risk: float = 300.0  # dollars risked per trade for the headline stats (prop firms use their own risk)
 
 
 def subset(trades: Trades, lo_day: int, hi_day: int) -> Trades:
@@ -59,11 +57,26 @@ def luck_bar(n_trials: int, n_days: int) -> float:
     return z * math.sqrt(252 / n_days)
 
 
-def scaled(trades: Trades, qty: int) -> Trades:
+def fixed_risk(trades: Trades, stop_pts: np.ndarray, inst: Instrument, risk: float, max_micros: int) -> Trades:
+    """Re-size every trade so it risks the same dollars: as many micro contracts as fit inside `risk` at the stop.
+
+    Trades whose stop is too wide for even one micro are skipped (you would not take them at that risk).
+    """
+    micro = get_instrument("M" + inst.data)
+    pts = (trades.exit_px - trades.entry_px) * trades.direction
+    worst_pts = (trades.mae / inst.point_value + inst.commission_rt / inst.point_value)  # <= 0, slippage included
+    qty = np.minimum(np.floor(risk / (stop_pts * micro.point_value)), max_micros)
+    qty = np.where(np.isfinite(qty), qty, 0)
     t = Trades(*(getattr(trades, f) for f in Trades.__dataclass_fields__))
-    t.pnl = trades.pnl * qty
-    t.mae = trades.mae * qty
-    return t
+    t.pnl = (pts * micro.point_value - micro.commission_rt) * qty
+    t.mae = np.minimum(worst_pts * micro.point_value * qty, 0.0) - micro.commission_rt * qty
+    keep = qty > 0
+    return Trades(*(getattr(t, f)[keep] for f in Trades.__dataclass_fields__))
+
+
+def trade_stops(trades: Trades, signals) -> np.ndarray:
+    """Stop distance (points) each trade was entered with. Entries fill on the bar after the signal."""
+    return np.asarray(signals.stop_pts, np.float64)[trades.entry_i - 1]
 
 
 @njit(cache=True)
@@ -90,31 +103,25 @@ def daily_limits(trades: Trades, loss_stop: float, profit_lock: float) -> Trades
     return Trades(*(getattr(trades, f)[m] for f in Trades.__dataclass_fields__))
 
 
-def best_prop_setup(ins: Trades, oos: Trades, split: int, oos_days: int, rules: PropRules, cfg, micro: bool) -> dict:
-    """Pick contract count + daily loss stop + daily profit lock with the best TRAINING pass rate,
-    then report unseen results with that exact setup.
+def firm_results(ins: Trades, oos: Trades, ins_stops, oos_stops, split, oos_days, inst, firms: dict) -> dict:
+    """Run the same trades through every firm's evaluation, each at that firm's fixed risk per trade.
 
-    The setup is chosen on training data only, so the unseen pass rate stays honest.
+    The headline firm is the one with the best TRAINING pass rate, so its unseen pass rate stays honest.
     """
-    limit = rules.max_minis * (10 if micro else 1)
-    sizes = [q for q in cfg.sizes if q <= limit] or [1]
-    def score(p):  # higher pass rate first, then fewer days to pass
-        rate = p["prop_pass_rate"] if p["prop_pass_rate"] == p["prop_pass_rate"] else 0.0
-        days = p["prop_days_to_pass"] if p["prop_days_to_pass"] == p["prop_days_to_pass"] else 1e9
-        return (round(rate, 6), -days)
-
-    best, best_p = (sizes[0], 0, 0), None
-    for q in sizes:
-        sized = scaled(ins, q)
-        for ls in cfg.loss_stops:
-            for pl in cfg.profit_locks:
-                p = evaluate_prop(daily_limits(sized, ls, pl), split, rules)
-                if best_p is None or score(p) > score(best_p):
-                    best, best_p = (q, ls, pl), p
-    q, ls, pl = best
-    out = {f"is_{k}": v for k, v in best_p.items()}
-    out.update({f"oos_{k}": v for k, v in evaluate_prop(daily_limits(scaled(oos, q), ls, pl), oos_days, rules).items()})
-    out.update(contracts=q, daily_loss_stop=ls, daily_profit_lock=pl)
+    out, best, best_key = {}, None, None
+    for key, rules in firms.items():
+        cap = rules.max_minis * 10
+        p_in = evaluate_prop(fixed_risk(ins, ins_stops, inst, rules.risk, cap), split, rules)
+        p_out = evaluate_prop(fixed_risk(oos, oos_stops, inst, rules.risk, cap), oos_days, rules)
+        out.update({f"f_{key}_is_pass": p_in["prop_pass_rate"], f"f_{key}_oos_pass": p_out["prop_pass_rate"],
+                    f"f_{key}_oos_fail": p_out["prop_fail_rate"], f"f_{key}_oos_days": p_out["prop_days_to_pass"]})
+        score = p_in["prop_pass_rate"] if p_in["prop_pass_rate"] == p_in["prop_pass_rate"] else -1.0
+        if best is None or score > best[0]:
+            best, best_key = (score, p_in, p_out), key
+    _, p_in, p_out = best
+    out.update({f"is_{k}": v for k, v in p_in.items()})
+    out.update({f"oos_{k}": v for k, v in p_out.items()})
+    out["best_firm"] = best_key
     return out
 
 
@@ -125,10 +132,16 @@ def side_split(trades: Trades, prefix: str) -> dict:
     }
 
 
-def evaluate(bars, signals, inst: Instrument, rules: PropRules, cfg: EvalConfig, n_trials: int) -> dict:
-    trades = run_backtest(bars, signals, inst, cfg.slippage_ticks, cfg.qty)
+def evaluate(bars, signals, inst: Instrument, firms: dict, cfg: EvalConfig, n_trials: int) -> dict:
+    """firms: {key: PropRules}. Headline stats are at a fixed cfg.risk dollars per trade, sized in micros."""
+    raw = run_backtest(bars, signals, inst, cfg.slippage_ticks, 1)
     n_days = int(bars.day[-1]) + 1
     split = int(n_days * (1 - cfg.oos_fraction))
+    stops = trade_stops(raw, signals)
+    raw_in, raw_out = raw.day < split, raw.day >= split
+    pick = lambda t, m: Trades(*(getattr(t, f)[m] for f in Trades.__dataclass_fields__))
+    r_ins, r_oos = pick(raw, raw_in), shift_days(pick(raw, raw_out), split)
+    trades = fixed_risk(raw, stops, inst, cfg.risk, 10**6)
 
     ins = subset(trades, 0, split)
     oos = shift_days(subset(trades, split, n_days), split)
@@ -143,7 +156,7 @@ def evaluate(bars, signals, inst: Instrument, rules: PropRules, cfg: EvalConfig,
 
     row = {f"is_{k}": v for k, v in m_in.items()}
     row.update({f"oos_{k}": v for k, v in m_out.items()})
-    row.update(best_prop_setup(ins, oos, split, n_days - split, rules, cfg, bool(inst.data_symbol)))
+    row.update(firm_results(r_ins, r_oos, stops[raw_in], stops[raw_out], split, n_days - split, inst, firms))
     row.update(side_split(ins, "is"))
     row.update(side_split(oos, "oos"))
     row["stability"] = stability

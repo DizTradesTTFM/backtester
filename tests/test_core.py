@@ -87,7 +87,7 @@ def test_prop_pass_fail_and_trailing():
 
 
 def test_prop_daily_loss_limit():
-    rules = PropRules("t", 1000, 5000, "eod", daily_loss_limit=300, max_days=10)
+    rules = PropRules("t", 1000, 5000, "eod", daily_loss_limit=300, max_days=10, dll_fails=True)
     r = evaluate_prop(trades_from([0, 0], [-200, -200]), 20, rules, step=100)
     assert r["prop_fail_rate"] == 1.0
 
@@ -104,7 +104,7 @@ def test_every_strategy_runs_on_sample(name):
     sig = mod.generate(bars, p)
     assert sig is not None
     assert len(sig.entry) == len(bars)
-    row = evaluate(bars, sig, get_instrument("ES"), PropRules("t", 3000, 2000, "eod", 1000, 60), EvalConfig(), 100)
+    row = evaluate(bars, sig, get_instrument("ES"), {"t": PropRules("t", 3000, 2000, "eod", 1000, 60)}, EvalConfig(), 100)
     assert row["verdict"] in {"PASS", "WATCH", "FAIL"}
 
 
@@ -131,18 +131,34 @@ def test_timeframe_signals_fire_on_bigger_bar_close():
     assert len(fired) and np.isin(fired, ends).all()
 
 
-def test_best_prop_size_picks_on_training_and_respects_limit():
-    from backtester.evaluate import EvalConfig as EC, best_prop_setup
+def test_fixed_risk_sizes_in_micros_and_skips_too_wide_stops():
+    from backtester.evaluate import fixed_risk
 
-    rules = PropRules("t", profit_target=1000, max_loss=500, trailing="eod", daily_loss_limit=0, max_days=10, max_minis=2)
-    # $60/day steady winner: 1 contract times out, bigger sizes pass faster; limit caps minis at 2
-    ins = trades_from(range(40), [60] * 40)
-    oos = trades_from(range(20), [60] * 20)
-    cfg = EC(sizes=(1, 2, 3, 4), loss_stops=(0,), profit_locks=(0,))
-    out = best_prop_setup(ins, oos, 40, 20, rules, cfg, micro=False)
-    assert out["contracts"] == 2 and out["oos_prop_pass_rate"] == 1.0
-    out = best_prop_setup(ins, oos, 40, 20, rules, cfg, micro=True)
-    assert out["contracts"] == 4
+    es = get_instrument("ES")
+    # two ES trades: +4 points with a 3-point stop, -10 points with a 40-point stop
+    t = Trades(np.array([1, 5]), np.array([3, 8]), np.array([1, -1]), np.array([100.0, 200.0]),
+               np.array([104.0, 210.0]), np.array([195.5, -504.5]), np.array([-54.5, -504.5]), np.array([0, 1]))
+    out = fixed_risk(t, np.array([3.0, 40.0]), es, risk=300, max_micros=50)
+    # MES = $5/point: 300 / (3 * 5) = 20 micros; 40-point stop = $200 per micro -> 1 micro
+    assert out.pnl[0] == pytest.approx((4 * 5 - 1.5) * 20)
+    assert out.pnl[1] == pytest.approx((-10 * 5 - 1.5) * 1)
+    assert len(fixed_risk(t, np.array([3.0, 80.0]), es, risk=300, max_micros=50)) == 1  # $400 per micro > $300
+    assert fixed_risk(t, np.array([3.0, 40.0]), es, risk=300, max_micros=8).pnl[0] == pytest.approx((4 * 5 - 1.5) * 8)
+
+
+def test_prop_consistency_lock_and_daily_pause():
+    # consistency 50%: one +1000 day can't pass alone; passes once another day brings the best day to <= half
+    rules = PropRules("t", 1000, 2000, "eod", 0, 10, consistency=0.5)
+    assert evaluate_prop(trades_from([0], [1000]), 20, rules, step=100)["prop_pass_rate"] == 0
+    r = evaluate_prop(trades_from([0, 1], [1000, 1000]), 20, rules, step=100)
+    assert r["prop_pass_rate"] == 1.0 and r["prop_days_to_pass"] == 2
+    # lock: floor stops rising at +100, so after +2000 the account survives a -1800 drop (floor would be +500 without it)
+    rules = PropRules("t", 5000, 1000, "eod", 0, 10, lock_at=100)
+    assert evaluate_prop(trades_from([0, 1, 2], [900, 1100, -1800]), 20, rules, step=100)["prop_fail_rate"] == 0
+    # daily loss limit that pauses instead of failing: -600 trade is cut at -500, next day's trades still count
+    rules = PropRules("t", 1000, 2000, "eod", 500, 10, dll_fails=False)
+    r = evaluate_prop(trades_from([0, 0, 1], [-600, 900, 1600]), 20, rules, step=100)
+    assert r["prop_pass_rate"] == 1.0
 
 
 def test_runner_end_to_end_with_robustness(tmp_path):
@@ -151,13 +167,13 @@ def test_runner_end_to_end_with_robustness(tmp_path):
     data = tmp_path / "ES_1m.parquet"
     make_sample_bars(days=60).to_parquet(data)
     db = tmp_path / "r.db"
-    run("t", ["ES"], ["orb"], workers=1, data_paths={"ES": data}, db_path=db)
+    run("t", ["ES"], ["orb"], ["topstep_50k", "lucid_flex_25k"], workers=1, data_paths={"ES": data}, db_path=db)
     rows = connect(db).execute("SELECT metrics, verdict FROM results").fetchall()
     assert len(rows) == len(param_combos(STRATEGIES["orb"]))
     import json
 
     m = json.loads(rows[0][0])
-    assert "robustness" in m and "contracts" in m and "oos_long_profit" in m
+    assert "robustness" in m and "f_lucid_flex_25k_oos_pass" in m and m["best_firm"] in ("topstep_50k", "lucid_flex_25k")
 
 
 def test_daily_limits_skip_rest_of_day():
@@ -167,19 +183,6 @@ def test_daily_limits_skip_rest_of_day():
     kept = daily_limits(t, loss_stop=300, profit_lock=500)
     # day 0: -200, -200 (now -400 <= -300) -> third skipped; day 1: +600 >= 500 -> second skipped
     assert list(kept.pnl) == [-200, -200, 600]
-
-
-def test_daily_limits_can_rescue_prop_eval():
-    from backtester.evaluate import best_prop_setup
-
-    rules = PropRules("t", profit_target=1000, max_loss=1000, trailing="eod", daily_loss_limit=0, max_days=20)
-    # each day: +300 then a -900 trade. Without a profit lock it blows up; locking at +300 passes.
-    days = [d for d in range(60) for _ in range(2)]
-    pnl = [x for _ in range(60) for x in (300, -900)]
-    ins = trades_from(days, pnl)
-    cfg = EvalConfig(sizes=(1,), loss_stops=(0,), profit_locks=(0, 300))
-    out = best_prop_setup(ins, ins, 60, 60, rules, cfg, micro=False)
-    assert out["daily_profit_lock"] == 300 and out["is_prop_pass_rate"] == 1.0
 
 
 def test_background_job_start_watch_stop(tmp_path, monkeypatch):
