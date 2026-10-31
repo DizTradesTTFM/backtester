@@ -151,7 +151,8 @@ def plot_layout(fig, height=360):
 
 # ---- plain-English settings ----------------------------------------------------
 _WORDS = {
-    "hours": {"ny": "NY session", "london_ny": "London + NY", "all": "all hours", "open": "first 2 hours"},
+    "hours": {"ny": "NY session", "london_ny": "London + NY", "all": "all hours", "open": "first 2 hours",
+              "ny_open": "NY open (9:30-11:30)", "ny+asia": "NY + Asia", "asia": "Asia (8 PM-2 AM)"},
     "stop": {"swing": "swing stop", "body": "body stop"},
     "setup": {"erl": "ERL (swing sweep)", "irl": "IRL (FVG)"},
     "side": {"both": "longs + shorts", "long": "longs only", "short": "shorts only", "trend": "with the SMA(50) trend"},

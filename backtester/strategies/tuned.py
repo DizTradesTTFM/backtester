@@ -12,10 +12,18 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from ..indicators import atr
+from ..indicators import atr, hhmm, last_bar_of_day
 from .quantjourney import chart, make, prev_max, prev_min, sma
 
-WINDOWS = {"all": (930, 1530), "open": (930, 1130)}
+WINDOWS = {"all": (930, 1530), "open": (930, 1130),
+           # New York times. Asia = Tokyo/Hong Kong hours, 8 PM to 2 AM New York.
+           "ny_open": (930, 1130), "ny": (930, 1530), "asia": [(2000, 2400), (0, 200)],
+           "ny+asia": [(930, 1530), (2000, 2400), (0, 200)]}
+
+
+def overnight_force_exit(bars):
+    """Flat by 3:55 PM New York (prop rule), but allowed to hold through the evening/Asia session."""
+    return ((bars.minute >= hhmm(1555)) & (bars.minute < hhmm(1800))) | last_bar_of_day(bars.day)
 U = 0.5  # pct_atr: 1% of the original = 0.5 ATR
 
 
@@ -76,6 +84,20 @@ def o14f(bars, p):
                    limit_px=big.close - d, stop_px=big.close + d, expiry=p["every"], hold=10)
 
 
+def o14c(bars, p):
+    """Capo's version: the tuned OCO dip-or-breakout, NY and/or Asia session, take profit 1.4R or more."""
+    big, ends, a, lk, sk = _common(bars, p)
+    u = a * U
+    every5 = (np.arange(len(big)) % 5) == 4
+    long = every5 & lk
+    short = every5 & sk & ~long
+    lim = np.where(long, big.close - 2.0 * u, big.close + 2.0 * u)
+    stp = np.where(long, big.close + 2.0 * u, big.close - 2.0 * u)
+    force = overnight_force_exit(bars) if "asia" in p["hours"] else None
+    return _finish(bars, big, ends, p, long, short, a * p["stop_atr"], limit_px=lim, stop_px=stp, expiry=5,
+                   hold=20, force=force)
+
+
 def o20t(bars, p):
     big, ends, a, lk, sk = _common(bars, {**p, "side": "trend" if p["side"] == "trend" else "long"})
     n = p["lookback"]
@@ -97,6 +119,12 @@ def _s(name, fn, desc, extra):
 
 
 TUNED = [
+    SimpleNamespace(NAME="qj_o14_capo_oco_dip_breakout", generate=o14c, MINE=True, SOURCE="QuantJourney (Capo's edit)",
+                    DESCRIPTION="Capo's version of Orders #14: the tuned OCO dip-or-breakout traded only in the NY "
+                                "session, the Asia session (8 PM-2 AM NY), or both, with a take profit of 1.4R or more. "
+                                "Flat by 3:55 PM NY.",
+                    PARAM_GRID={"tf": [15, 30], "stop_atr": [1.0, 1.5, 2.0], "target_r": [1.4, 2, 3, 4],
+                                "hours": ["ny_open", "ny", "asia", "ny+asia"], "side": ["long", "trend"]}),
     SimpleNamespace(NAME="qj_o14_fast_oco_dip_breakout", generate=o14f, MINE=True, SOURCE="QuantJourney (tuned)",
                     DESCRIPTION="Faster Orders #14: the tuned OCO dip-or-breakout (longs, NY open) with closer orders, "
                                 "orders every 3 or 5 bars, and a closer take profit, to pass before time runs out.",

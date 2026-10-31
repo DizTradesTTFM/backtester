@@ -79,10 +79,13 @@ def state(enter, leave):
 
 # ---- turning chart-bar decisions into engine signals -----------------------------
 def make(bars, big, ends, tf, long, stop, short=None, *, target=None, exit_long=None, exit_short=None, hold=0,
-         trail=None, limit_px=None, stop_px=None, cap=None, expiry=1, window=(930, 1530)):
+         trail=None, limit_px=None, stop_px=None, cap=None, expiry=1, window=(930, 1530), force=None):
     """Everything is per chart bar; hold/expiry are counted in chart bars. Entries only 9:30-15:30."""
     n, m = len(bars), len(big)
-    win = entry_window(big, *window)
+    windows = [window] if isinstance(window[0], int) else window
+    win = np.zeros(m, bool)
+    for w in windows:
+        win |= entry_window(big, *w)
     short = np.zeros(m, bool) if short is None else short
     e = np.zeros(m, np.int8)
     e[long & win] = 1
@@ -105,7 +108,7 @@ def make(bars, big, ends, tf, long, stop, short=None, *, target=None, exit_long=
     tgt = put(target, float, 0.0)
     tgt[~np.isfinite(tgt)] = 0.0
     return Signals(
-        entry, put(stop, float, 0.0), tgt, default_force_exit(bars),
+        entry, put(stop, float, 0.0), tgt, default_force_exit(bars) if force is None else force,
         exit_sig=put(xs, np.int8, 0),
         max_hold=put(hold * tf, np.int64, 0),
         trail_pts=put(trail, float, 0.0),
