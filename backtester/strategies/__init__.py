@@ -2,14 +2,14 @@
 
 import itertools
 
-from . import channel_breakout, ema_trend, orb, qj_o01_sma_cross, quantjourney, rsi_reversal, time_momentum, tuned, vwap_fade
+from . import channel_breakout, ema_trend, orb, prop_nq, qj_o01_sma_cross, quantjourney, rsi_reversal, time_momentum, tuned, vwap_fade
 
-_MODULES = [orb, vwap_fade, ema_trend, rsi_reversal, channel_breakout, time_momentum, qj_o01_sma_cross, *quantjourney.PORTS, *tuned.TUNED]
+_MODULES = [orb, vwap_fade, ema_trend, rsi_reversal, channel_breakout, time_momentum, qj_o01_sma_cross, *quantjourney.PORTS, *tuned.TUNED, *prop_nq.PROP]
 STRATEGIES = {m.NAME: m for m in _MODULES}
 # Capo's strategies (the QuantJourney ports). The built-in examples stay in code but are not run by default.
 MINE = [n for n in STRATEGIES if getattr(STRATEGIES[n], "MINE", False)]
 
-_SMALL = {"rsi", "sma", "ema", "macd", "oco"}
+_SMALL = {"rsi", "sma", "ema", "macd", "oco", "nq", "orb"}
 
 
 def title(name: str) -> str:
@@ -25,6 +25,8 @@ def tag(name: str) -> str:
     parts = name.split("_")
     if parts[0] == "qj" and len(parts) > 1 and parts[1][1:].isdigit():
         return ("Orders" if parts[1][0] == "o" else "Weights") + f" #{int(parts[1][1:])}"
+    if parts[0] == "nq":
+        return "Prop (new)"
     return "Built-in"
 
 

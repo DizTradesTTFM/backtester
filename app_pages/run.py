@@ -65,7 +65,7 @@ def status():
 busy = status()
 
 # ---- 01 strategies -----------------------------------------------------------
-strat_keys = sorted(MINE, key=lambda n: (tag(n).split()[0], int(tag(n).split("#")[1]) if "#" in tag(n) else 0))
+strat_keys = sorted(MINE, key=lambda n: (tag(n).split()[0], int(tag(n).split("#")[1]) if "#" in tag(n) else 0, n))
 for n in strat_keys:
     st.session_state.setdefault(f"s_{n}", True)
 with ui.card("Strategies", f"{len(strat_keys)} available", key="pick_strats", number="01"):
