@@ -33,19 +33,32 @@ class PropRules:
         return asdict(self)
 
 
-# Rules as published by the firms / review sites in October 2026. Firms change these often: verify before buying.
-# Apex: 30 calendar days ~ 21 trading days. Lucid and Topstep have no time limit; 60 trading days is our cut-off.
+# Rules as published in October 2026 (Lucid from Capo's screenshots of lucidtrading.com, the rest from review sites).
+# Firms change these often: verify before buying. DLL = daily loss limit, always ON where the firm makes it optional;
+# hitting it ends the day, it does not fail the account. Apex: 30 calendar days ~ 21 trading days.
+# Firms without a time limit get 60 trading days as our cut-off.
+NEVER = 1e12  # drawdown floor never locks
 PROP_PRESETS = {
     "topstep_50k": PropRules("Topstep 50K", 3000, 2000, "eod", 1000, 60, 2, 5, 300, 0, False, 0.5),
-    "lucid_flex_25k": PropRules("Lucid Flex 25K", 1250, 1000, "eod", 0, 60, 1, 2, 150, 100, False, 0.5),
-    "lucid_pro_25k": PropRules("Lucid Pro 25K", 1250, 1000, "eod", 0, 60, 1, 2, 150, 100, False, 0.4),
-    "lucid_flex_50k": PropRules("Lucid Flex 50K", 3000, 2000, "eod", 0, 60, 1, 4, 300, 100, False, 0.5),
-    "lucid_pro_50k": PropRules("Lucid Pro 50K", 3000, 2000, "eod", 1200, 60, 1, 4, 300, 100, False, 0.4),
+    "lucid_flex_25k": PropRules("Lucid Flex 25K", 1250, 1000, "eod", 600, 60, 1, 2, 150, 100, False, 0.4),
+    "lucid_flex_50k": PropRules("Lucid Flex 50K", 3000, 2000, "eod", 1200, 60, 1, 4, 300, 100, False, 0.4),
+    "lucid_pro_25k": PropRules("Lucid Pro 25K", 1250, 1000, "eod", 600, 60, 1, 2, 150, 100, False, 0.0),
+    "lucid_pro_50k": PropRules("Lucid Pro 50K", 3000, 2000, "eod", 1200, 60, 1, 4, 300, 100, False, 0.0),
+    "mffu_builder_25k": PropRules("MyFundedFutures Builder 25K", 1500, 1000, "eod", 600, 60, 1, 2, 150, 100, False, 0.0),
+    "mffu_builder_50k": PropRules("MyFundedFutures Builder 50K", 3000, 2000, "eod", 1000, 60, 1, 4, 300, 100, False, 0.0),
+    "mffu_rapid_eod_25k": PropRules("MyFundedFutures Rapid EOD 25K", 1500, 1000, "eod", 0, 60, 4, 2, 150, 100, False, 0.3),
+    "mffu_rapid_eod_50k": PropRules("MyFundedFutures Rapid EOD 50K", 3000, 2000, "eod", 0, 60, 4, 3, 300, 100, False, 0.3),
+    "tradeify_growth_25k": PropRules("Tradeify Growth 25K", 1500, 1000, "eod", 600, 60, 1, 1, 150, NEVER, False, 0.0),
+    "tradeify_growth_50k": PropRules("Tradeify Growth 50K", 3000, 2000, "eod", 1250, 60, 1, 4, 300, NEVER, False, 0.0),
+    "tradeify_select_25k": PropRules("Tradeify Select 25K", 1500, 1000, "eod", 0, 60, 3, 1, 150, NEVER, False, 0.4),
+    "tradeify_select_50k": PropRules("Tradeify Select 50K", 3000, 2000, "eod", 0, 60, 3, 4, 300, NEVER, False, 0.4),
     "apex_25k_eod": PropRules("Apex 25K EOD", 1500, 1000, "eod", 500, 21, 1, 4, 150, 1500, False, 0.0),
-    "apex_25k_intraday": PropRules("Apex 25K Intraday", 1500, 1000, "intraday", 0, 21, 1, 4, 150, 1500, False, 0.0),
     "apex_50k_eod": PropRules("Apex 50K EOD", 3000, 2000, "eod", 1000, 21, 1, 6, 300, 3000, False, 0.0),
+    "apex_25k_intraday": PropRules("Apex 25K Intraday", 1500, 1000, "intraday", 0, 21, 1, 4, 150, 1500, False, 0.0),
     "apex_50k_intraday": PropRules("Apex 50K Intraday", 3000, 2000, "intraday", 0, 21, 1, 6, 300, 3000, False, 0.0),
 }
+# Firms that allow running your own bot on funded accounts (Oct 2026). Apex and Topstep (funded) do not.
+BOTS_ALLOWED = {k for k in PROP_PRESETS if k.split("_")[0] in ("lucid", "mffu", "tradeify")}
 # Tested unless you pick otherwise: EOD drawdown accounts only (intraday trailing is still available on the Run page).
 DEFAULT_FIRMS = [k for k, r in PROP_PRESETS.items() if r.trailing == "eod"]
 

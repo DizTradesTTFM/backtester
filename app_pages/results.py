@@ -13,7 +13,7 @@ from backtester.data import load_bars
 from backtester.engine import run_backtest
 from backtester.evaluate import EvalConfig, fixed_risk, trade_stops
 from backtester.instruments import get_instrument
-from backtester.prop import PROP_PRESETS
+from backtester.prop import BOTS_ALLOWED, PROP_PRESETS
 from backtester.runner import RESULTS_DB
 from backtester.strategies import STRATEGIES
 from app_pages import ui
@@ -236,7 +236,9 @@ with ui.card("Look closer", "every prop firm, equity curve and every trade", key
         for k in sorted(firms, key=lambda k: -(row.get(f"f_{k}_oos_pass") if pd.notna(row.get(f"f_{k}_oos_pass")) else -1)):
             r_ = PROP_PRESETS.get(k)
             firm_rows.append([
-                f'<div class="name">{ui.esc(firm_name(k))}</div>'
+                f'<div class="name">{ui.esc(firm_name(k))} '
+                + (f'<span class="bt-pill" style="color:{ui.GREEN};background:{ui.GREEN}1f">bots OK</span>' if k in BOTS_ALLOWED
+                   else f'<span class="bt-pill" style="color:{ui.PINK};background:{ui.PINK}1f">no bots</span>') + '</div>'
                 + (f'<div class="set">${r_.risk:,.0f} risk/trade · target ${r_.profit_target:,.0f} · '
                    f'drawdown ${r_.max_loss:,.0f} {r_.trailing.upper()}</div>' if r_ else ""),
                 f'<span style="color:{ui.GREEN}">{pct(row.get(f"f_{k}_oos_pass"))}</span>',
