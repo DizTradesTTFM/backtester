@@ -19,7 +19,7 @@ from .prop import PropRules, evaluate_prop
 
 
 # Bump when scoring changes, so the next run starts a fresh batch instead of resuming an old-style one.
-SCORING_VERSION = 8
+SCORING_VERSION = 9
 
 
 @dataclass(frozen=True)
@@ -75,8 +75,12 @@ def fixed_risk(trades: Trades, stop_pts: np.ndarray, inst: Instrument, risk: flo
 
 
 def trade_stops(trades: Trades, signals) -> np.ndarray:
-    """Stop distance (points) each trade was entered with. Entries fill on the bar after the signal."""
-    return np.asarray(signals.stop_pts, np.float64)[trades.entry_i - 1]
+    """Stop distance (points) each trade was entered with: from the last entry signal before the fill
+    (the bar before for market entries; earlier for limit/stop entry orders)."""
+    sig_idx = np.flatnonzero(signals.entry)
+    k = np.searchsorted(sig_idx, trades.entry_i, side="left") - 1
+    src = sig_idx[np.clip(k, 0, max(len(sig_idx) - 1, 0))] if len(sig_idx) else trades.entry_i - 1
+    return np.asarray(signals.stop_pts, np.float64)[src]
 
 
 @njit(cache=True)
@@ -115,9 +119,17 @@ def firm_results(ins: Trades, oos: Trades, ins_stops, oos_stops, split, oos_days
         p_out = evaluate_prop(fixed_risk(oos, oos_stops, inst, rules.risk, cap), oos_days, rules)
         out.update({f"f_{key}_is_pass": p_in["prop_pass_rate"], f"f_{key}_oos_pass": p_out["prop_pass_rate"],
                     f"f_{key}_oos_fail": p_out["prop_fail_rate"], f"f_{key}_oos_days": p_out["prop_days_to_pass"]})
+        if rules.stage != "eval":  # funded rows are shown per firm but never pick the headline
+            continue
         score = p_in["prop_pass_rate"] if p_in["prop_pass_rate"] == p_in["prop_pass_rate"] else -1.0
         if best is None or score > best[0]:
             best, best_key = (score, p_in, p_out), key
+    if best is None:  # only funded accounts picked: use the first one
+        key = next(iter(firms))
+        cap = firms[key].max_minis * 10
+        best_key = key
+        best = (0, evaluate_prop(fixed_risk(ins, ins_stops, inst, firms[key].risk, cap), split, firms[key]),
+                evaluate_prop(fixed_risk(oos, oos_stops, inst, firms[key].risk, cap), oos_days, firms[key]))
     _, p_in, p_out = best
     out.update({f"is_{k}": v for k, v in p_in.items()})
     out.update({f"oos_{k}": v for k, v in p_out.items()})

@@ -5,9 +5,9 @@ from .base import build, default_force_exit, entry_window, expand, to_timeframe
 
 MINE = True  # one of Capo's picks: selected by default on the Run page
 SOURCE = "QuantJourney example_orders_01_market_sma_cross.py"
-NAME = "qj_01_sma_cross"
+NAME = "qj_o01_sma_cross"
 DESCRIPTION = (
-    "QuantJourney #1, Market SMA Cross. Buy when SMA(20) crosses above SMA(50), sell when it crosses back below. "
+    "QuantJourney orders #1, Market SMA Cross. Buy when SMA(20) crosses above SMA(50), sell when it crosses back below. "
     "Long only, like the original. Ported from daily ETF bars to ES/NQ intraday charts. The original has no stop, "
     "but fixed-dollar risk needs one, so a protective stop of N x ATR is added. Flat by 15:55."
 )

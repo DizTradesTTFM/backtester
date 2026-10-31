@@ -275,3 +275,58 @@ def test_magic_body_stop_needs_body_beyond_half_the_opposing_run():
     assert stop_distance("body", o, c, low, np.full(4, 120.0))[1] == 6
     # lowest body 110 is not beyond 50% when the run is only 100..110 (50% = 105) -> keep swing stop 10
     assert stop_distance("body", o, c, low, np.full(4, 110.0))[3] == 10
+
+
+def test_engine_limit_stop_entries_trail_hold_and_signal_exit():
+    flat = (100, 100, 100, 100)
+    # limit buy at 98: bar 1 low 99 no fill, bar 2 low 97 fills at 98 (no slippage)
+    bars = make_bars([flat, (100, 101, 99, 100), (99, 99, 97, 98), (98, 99, 98, 99), flat])
+    s = signals(5, {0: 1}, stop=50, target=0)
+    s.limit_px = np.full(5, 98.0)
+    s.expiry = np.full(5, 3)
+    s.force_exit = np.zeros(5, bool)
+    s.force_exit[4] = True
+    t = run_backtest(bars, s, INST, slippage_ticks=1)
+    assert t.entry_i[0] == 2 and t.entry_px[0] == 98
+    # same order but it expires after 1 bar -> no trade
+    s.expiry = np.full(5, 1)
+    assert len(run_backtest(bars, s, INST, slippage_ticks=1)) == 0
+
+    # buy-stop at 102: fills when the high reaches it, plus slippage; held max 1 bar then exits at the close
+    bars = make_bars([flat, (101, 103, 101, 102), (102, 104, 102, 104), (104, 105, 104, 105), flat])
+    s = signals(5, {0: 1}, stop=50, target=0)
+    s.stop_px = np.full(5, 102.0)
+    s.expiry = np.full(5, 5)
+    s.max_hold = np.full(5, 1)
+    t = run_backtest(bars, s, INST, slippage_ticks=1)
+    assert t.entry_i[0] == 1 and t.entry_px[0] == 103 and t.exit_i[0] == 2 and t.exit_px[0] == 103
+
+    # trailing stop 3 points: highs 105 then 110 -> stop 107; bar 4 low 106 stops out at 107 - slip
+    bars = make_bars([flat, (100, 105, 100, 105), (105, 110, 105, 110), (110, 110, 109, 109), (109, 109, 106, 106)])
+    s = signals(5, {0: 1}, stop=3, target=0)
+    s.trail_pts = np.full(5, 3.0)
+    t = run_backtest(bars, s, INST, slippage_ticks=1)
+    assert t.exit_i[0] == 4 and t.exit_px[0] == 106
+
+    # signal exit closes longs at the close, and a new entry on that same bar is still allowed
+    bars = make_bars([flat] * 6)
+    s = signals(6, {0: 1, 2: 1}, stop=50, target=0, force=[5])
+    s.exit_sig = np.zeros(6, np.int8)
+    s.exit_sig[2] = 1
+    t = run_backtest(bars, s, INST, slippage_ticks=0)
+    assert list(t.exit_i[:1]) == [2] and t.entry_i[1] == 3
+
+
+def test_funded_win_days_rule():
+    from backtester.prop import PropRules, evaluate_prop
+    from backtester.engine import Trades
+    import numpy as np
+    n = 10
+    pnl = np.full(n, 200.0)
+    t = Trades(*[np.zeros(n) for _ in Trades.__dataclass_fields__])
+    t = Trades(**{**t.__dict__, "day": np.arange(n), "pnl": pnl, "mae": np.zeros(n)})
+    r = PropRules("x", 1, 2000, "eod", 1000, 60, 1, 5, 300, 0, False, 0.0, "funded", 5, 150)
+    out = evaluate_prop(t, 70, r, step=100)
+    assert out["prop_pass_rate"] == 1.0 and out["prop_days_to_pass"] == 5
+    r2 = PropRules("x", 1, 2000, "eod", 1000, 60, 1, 5, 300, 0, False, 0.0, "funded", 5, 250)
+    assert evaluate_prop(t, 70, r2, step=100)["prop_pass_rate"] == 0.0

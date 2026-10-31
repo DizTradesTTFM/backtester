@@ -28,6 +28,9 @@ class PropRules:
     lock_at: float = 0.0  # the trailing floor stops rising here (dollars above the starting balance)
     dll_fails: bool = False  # True = hitting the daily loss limit fails the account; False = done for the day
     consistency: float = 0.0  # best day must be at most this share of total profit to pass (0 = no rule)
+    stage: str = "eval"  # "eval" = pass the evaluation; "funded" = reach your first payout without blowing the account
+    win_days: int = 0  # funded payout rule: this many winning days needed (0 = no rule)
+    win_day_min: float = 0.0  # ...each making at least this many dollars
 
     def to_dict(self):
         return asdict(self)
@@ -39,7 +42,19 @@ class PropRules:
 # Firms without a time limit get 60 trading days as our cut-off.
 NEVER = 1e12  # drawdown floor never locks
 PROP_PRESETS = {
-    "topstep_50k": PropRules("Topstep 50K", 3000, 2000, "eod", 1000, 60, 2, 5, 300, 0, False, 0.5),
+    # Topstep: no 25K account exists (50K/100K/150K only). Combine consistency 50%->55% in 2026; flat by 3:10 PM CT.
+    "topstep_50k": PropRules("Topstep 50K Combine", 3000, 2000, "eod", 1000, 60, 2, 5, 300, 0, False, 0.55),
+    # Topstep XFA (funded): floor locks at the starting balance; Standard payout = 5 winning days of $150+.
+    "topstep_50k_funded": PropRules("Topstep 50K Funded (XFA)", 1, 2000, "eod", 1000, 60, 5, 5, 300, 0, False, 0.0,
+                                    "funded", 5, 150),
+    # FundedNext Futures Rapid Pro (what LilFish runs). DLL is an add-on: always ON here. No time limit.
+    "fundednext_rapid_pro_25k": PropRules("FundedNext Rapid Pro 25K", 1500, 1000, "eod", 500, 60, 1, 2, 150, 100),
+    "fundednext_rapid_pro_50k": PropRules("FundedNext Rapid Pro 50K", 3000, 2000, "eod", 1000, 60, 1, 4, 300, 100),
+    # Funded: first payout needs $500 (25K) / $1,000 (50K est.) cycle profit, 3+ days, best day <= 40% of it.
+    "fundednext_rapid_pro_25k_funded": PropRules("FundedNext Rapid Pro 25K Funded", 500, 1000, "eod", 500, 60, 3, 2,
+                                                 150, 100, False, 0.4, "funded"),
+    "fundednext_rapid_pro_50k_funded": PropRules("FundedNext Rapid Pro 50K Funded", 1000, 2000, "eod", 1000, 60, 3, 4,
+                                                 300, 100, False, 0.4, "funded"),
     "lucid_flex_25k": PropRules("Lucid Flex 25K", 1250, 1000, "eod", 600, 60, 1, 2, 150, 100, False, 0.4),
     "lucid_flex_50k": PropRules("Lucid Flex 50K", 3000, 2000, "eod", 1200, 60, 1, 4, 300, 100, False, 0.4),
     "lucid_pro_25k": PropRules("Lucid Pro 25K", 1250, 1000, "eod", 600, 60, 1, 2, 150, 100, False, 0.0),
@@ -57,15 +72,16 @@ PROP_PRESETS = {
     "apex_25k_intraday": PropRules("Apex 25K Intraday", 1500, 1000, "intraday", 0, 21, 1, 4, 150, 1500, False, 0.0),
     "apex_50k_intraday": PropRules("Apex 50K Intraday", 3000, 2000, "intraday", 0, 21, 1, 6, 300, 3000, False, 0.0),
 }
-# Firms that allow running your own bot on funded accounts (Oct 2026). Apex and Topstep (funded) do not.
-BOTS_ALLOWED = {k for k in PROP_PRESETS if k.split("_")[0] in ("lucid", "mffu", "tradeify")}
+# Firms that allow running your own bot on funded accounts (Oct 2026). Apex bans bots; Topstep's funded-account
+# bot policy is unclear (sources conflict), so it is left out.
+BOTS_ALLOWED = {k for k in PROP_PRESETS if k.split("_")[0] in ("lucid", "mffu", "tradeify", "fundednext")}
 # Tested unless you pick otherwise: EOD drawdown accounts only (intraday trailing is still available on the Run page).
 DEFAULT_FIRMS = [k for k, r in PROP_PRESETS.items() if r.trailing == "eod"]
 
 
 @njit(cache=True)
 def _simulate_evals(t_day, pnl, mae, n_days, target, max_loss, intraday_trail, dll, max_days, min_days, step,
-                    lock_at, dll_fails, consistency):
+                    lock_at, dll_fails, consistency, win_days, win_day_min):
     n_starts = (n_days + step - 1) // step
     outcome = np.zeros(n_starts, np.int8)  # 1 pass, -1 fail, 0 timeout/ran out of data
     days_used = np.zeros(n_starts, np.int64)
@@ -81,6 +97,7 @@ def _simulate_evals(t_day, pnl, mae, n_days, target, max_loss, intraday_trail, d
         cur_day = s
         day_pnl = 0.0
         best_day = 0.0
+        wins = 0
         day_done = False
         traded_days = 0
         last_traded = -1
@@ -92,6 +109,8 @@ def _simulate_evals(t_day, pnl, mae, n_days, target, max_loss, intraday_trail, d
             if d != cur_day:
                 # end of the previous day(s): trail the floor on closing balance, up to the lock level
                 best_day = max(best_day, day_pnl)
+                if day_pnl >= win_day_min and day_pnl > 0:
+                    wins += 1
                 if not intraday_trail:
                     peak = max(peak, bal)
                     floor = min(peak - max_loss, lock_at)
@@ -128,7 +147,8 @@ def _simulate_evals(t_day, pnl, mae, n_days, target, max_loss, intraday_trail, d
                 res = -1
                 used = d - s + 1
                 break
-            if bal >= target and traded_days >= min_days:
+            today_win = 1 if (day_pnl >= win_day_min and day_pnl > 0) else 0
+            if bal >= target and traded_days >= min_days and wins + today_win >= win_days:
                 if consistency <= 0 or max(best_day, day_pnl) <= consistency * bal:
                     res = 1
                     used = d - s + 1
@@ -161,6 +181,8 @@ def evaluate_prop(trades: Trades, n_days: int, rules: PropRules, step: int = 5) 
         float(rules.lock_at),
         rules.dll_fails,
         float(rules.consistency),
+        int(rules.win_days),
+        float(rules.win_day_min),
     )
     valid = out != 2
     total = int(valid.sum())

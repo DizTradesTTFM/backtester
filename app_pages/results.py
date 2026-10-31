@@ -239,8 +239,10 @@ with ui.card("Look closer", "every prop firm, equity curve and every trade", key
                 f'<div class="name">{ui.esc(firm_name(k))} '
                 + (f'<span class="bt-pill" style="color:{ui.GREEN};background:{ui.GREEN}1f">bots OK</span>' if k in BOTS_ALLOWED
                    else f'<span class="bt-pill" style="color:{ui.PINK};background:{ui.PINK}1f">no bots</span>') + '</div>'
-                + (f'<div class="set">${r_.risk:,.0f} risk/trade · target ${r_.profit_target:,.0f} · '
-                   f'drawdown ${r_.max_loss:,.0f} {r_.trailing.upper()}</div>' if r_ else ""),
+                + (f'<div class="set">{"FUNDED · pass = first payout · " if r_.stage == "funded" else "Eval · "}'
+                   f'${r_.risk:,.0f} risk/trade · '
+                   + (f"{r_.win_days} days of ${r_.win_day_min:,.0f}+" if r_.win_days else f"target ${r_.profit_target:,.0f}")
+                   + f' · drawdown ${r_.max_loss:,.0f} {r_.trailing.upper()}</div>' if r_ else ""),
                 f'<span style="color:{ui.GREEN}">{pct(row.get(f"f_{k}_oos_pass"))}</span>',
                 f'<span style="color:{ui.PINK}">{pct(row.get(f"f_{k}_oos_fail"))}</span>',
                 days(row.get(f"f_{k}_oos_days")),

@@ -2,9 +2,9 @@
 
 import itertools
 
-from . import channel_breakout, ema_trend, magic_1h, magic_4h1h, orb, qj_01_sma_cross, rsi_reversal, time_momentum, vwap_fade
+from . import channel_breakout, ema_trend, magic_1h, magic_4h1h, orb, qj_o01_sma_cross, quantjourney, rsi_reversal, time_momentum, vwap_fade
 
-_MODULES = [orb, vwap_fade, ema_trend, rsi_reversal, channel_breakout, time_momentum, magic_4h1h, magic_1h, qj_01_sma_cross]
+_MODULES = [orb, vwap_fade, ema_trend, rsi_reversal, channel_breakout, time_momentum, magic_4h1h, magic_1h, qj_o01_sma_cross, *quantjourney.PORTS]
 STRATEGIES = {m.NAME: m for m in _MODULES}
 
 
