@@ -2,9 +2,9 @@
 
 import itertools
 
-from . import channel_breakout, ema_trend, orb, qj_o01_sma_cross, quantjourney, rsi_reversal, time_momentum, vwap_fade
+from . import channel_breakout, ema_trend, orb, qj_o01_sma_cross, quantjourney, rsi_reversal, time_momentum, tuned, vwap_fade
 
-_MODULES = [orb, vwap_fade, ema_trend, rsi_reversal, channel_breakout, time_momentum, qj_o01_sma_cross, *quantjourney.PORTS]
+_MODULES = [orb, vwap_fade, ema_trend, rsi_reversal, channel_breakout, time_momentum, qj_o01_sma_cross, *quantjourney.PORTS, *tuned.TUNED]
 STRATEGIES = {m.NAME: m for m in _MODULES}
 # Capo's strategies (the QuantJourney ports). The built-in examples stay in code but are not run by default.
 MINE = [n for n in STRATEGIES if getattr(STRATEGIES[n], "MINE", False)]

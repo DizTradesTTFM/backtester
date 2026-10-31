@@ -151,10 +151,10 @@ def plot_layout(fig, height=360):
 
 # ---- plain-English settings ----------------------------------------------------
 _WORDS = {
-    "hours": {"ny": "NY session", "london_ny": "London + NY", "all": "all hours"},
+    "hours": {"ny": "NY session", "london_ny": "London + NY", "all": "all hours", "open": "first 2 hours"},
     "stop": {"swing": "swing stop", "body": "body stop"},
     "setup": {"erl": "ERL (swing sweep)", "irl": "IRL (FVG)"},
-    "side": {"both": "longs + shorts", "long": "longs only", "short": "shorts only"},
+    "side": {"both": "longs + shorts", "long": "longs only", "short": "shorts only", "trend": "with the SMA(50) trend"},
 }
 
 
@@ -173,6 +173,12 @@ def _word(k, v):
         return "any sweep size" if v >= 1 else f"sweep ≤ {v:.0%} of C1"
     if k == "first_hour":
         return "first hour only" if v else "first 3 hours"
+    if k == "target_r":
+        return "no take profit" if not v else f"take profit {v}R"
+    if k == "stop_atr":
+        return f"stop {v} ATR"
+    if k == "hold_x":
+        return "normal hold" if v == 1 else f"hold {v}x longer"
     if k == "tf":
         return f"{v}-min chart"
     return f"{k.replace('_', ' ')} {v}"
