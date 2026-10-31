@@ -38,14 +38,16 @@ class PropRules:
 PROP_PRESETS = {
     "topstep_50k": PropRules("Topstep 50K", 3000, 2000, "eod", 1000, 60, 2, 5, 300, 0, False, 0.5),
     "lucid_flex_25k": PropRules("Lucid Flex 25K", 1250, 1000, "eod", 0, 60, 1, 2, 150, 100, False, 0.5),
-    "lucid_pro_25k": PropRules("Lucid Pro 25K", 1250, 1000, "eod", 0, 60, 1, 2, 150, 100, False, 0.0),
+    "lucid_pro_25k": PropRules("Lucid Pro 25K", 1250, 1000, "eod", 0, 60, 1, 2, 150, 100, False, 0.4),
     "lucid_flex_50k": PropRules("Lucid Flex 50K", 3000, 2000, "eod", 0, 60, 1, 4, 300, 100, False, 0.5),
-    "lucid_pro_50k": PropRules("Lucid Pro 50K", 3000, 2000, "eod", 1200, 60, 1, 4, 300, 100, False, 0.0),
+    "lucid_pro_50k": PropRules("Lucid Pro 50K", 3000, 2000, "eod", 1200, 60, 1, 4, 300, 100, False, 0.4),
     "apex_25k_eod": PropRules("Apex 25K EOD", 1500, 1000, "eod", 500, 21, 1, 4, 150, 1500, False, 0.0),
     "apex_25k_intraday": PropRules("Apex 25K Intraday", 1500, 1000, "intraday", 0, 21, 1, 4, 150, 1500, False, 0.0),
     "apex_50k_eod": PropRules("Apex 50K EOD", 3000, 2000, "eod", 1000, 21, 1, 6, 300, 3000, False, 0.0),
     "apex_50k_intraday": PropRules("Apex 50K Intraday", 3000, 2000, "intraday", 0, 21, 1, 6, 300, 3000, False, 0.0),
 }
+# Tested unless you pick otherwise: EOD drawdown accounts only (intraday trailing is still available on the Run page).
+DEFAULT_FIRMS = [k for k, r in PROP_PRESETS.items() if r.trailing == "eod"]
 
 
 @njit(cache=True)

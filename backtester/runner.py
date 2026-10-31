@@ -22,7 +22,7 @@ import numpy as np
 from .data import DATA_DIR, load_bars
 from .evaluate import SCORING_VERSION, EvalConfig, evaluate, verdict
 from .instruments import get_instrument
-from .prop import PROP_PRESETS
+from .prop import DEFAULT_FIRMS, PROP_PRESETS
 from .strategies import STRATEGIES, get_strategy, param_combos
 
 RESULTS_DB = Path(__file__).resolve().parent.parent / "results" / "results.db"
@@ -125,7 +125,7 @@ def build_jobs(instruments, strategies):
 
 def run(run_name, instruments, strategies, firms=None, workers=None, cfg=EvalConfig(), data_paths=None, db_path=RESULTS_DB):
     con = connect(db_path)
-    firms = {k: PROP_PRESETS[k] for k in (firms or PROP_PRESETS)}
+    firms = {k: PROP_PRESETS[k] for k in (firms or DEFAULT_FIRMS)}
     jobs = build_jobs(instruments, strategies)
 
     # the luck bar depends on how many combos were tried per instrument
@@ -185,15 +185,15 @@ def main():
     ap.add_argument("--run", default=None, help="batch name (default: based on the data files). Re-using a name resumes it")
     ap.add_argument("--instruments", nargs="+", default=["ES", "NQ"])
     ap.add_argument("--strategies", nargs="+", default=["all"])
-    ap.add_argument("--firms", nargs="+", default=["all"], help="prop firm rule sets to test against (default: all)")
+    ap.add_argument("--firms", nargs="+", default=["all"], help="prop firm rule sets to test against (default: every EOD account)")
     ap.add_argument("--workers", type=int, default=None, help="CPU cores to use (default: all but one)")
     ap.add_argument("--slippage", type=float, default=1.0, help="slippage in ticks per side")
     args = ap.parse_args()
 
     strategies = sorted(STRATEGIES) if args.strategies == ["all"] else args.strategies
-    firms = list(PROP_PRESETS) if args.firms == ["all"] else args.firms
+    firms = DEFAULT_FIRMS if args.firms == ["all"] else args.firms
     name = args.run or default_run_name(args.instruments)
-    if not args.run and set(firms) != set(PROP_PRESETS):
+    if not args.run and set(firms) != set(DEFAULT_FIRMS):
         name += "_firms" + hashlib.sha1(" ".join(sorted(firms)).encode()).hexdigest()[:4]
     if not args.run and set(strategies) != set(STRATEGIES):
         name += "_" + "+".join(sorted(strategies))  # its own batch, so the luck bar matches what was tested

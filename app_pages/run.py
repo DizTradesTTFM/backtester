@@ -9,7 +9,7 @@ import streamlit as st
 from backtester import jobs
 from backtester.data import DATA_DIR
 from backtester.instruments import INSTRUMENTS
-from backtester.prop import PROP_PRESETS
+from backtester.prop import DEFAULT_FIRMS, PROP_PRESETS
 from backtester.strategies import STRATEGIES, param_combos
 from app_pages import ui
 
@@ -67,7 +67,7 @@ with ui.card("What to test", "01 · Setup", ui.BLUE):
     mine = [s for s in sorted(STRATEGIES) if getattr(STRATEGIES[s], "MINE", False)]
     strats = c2.multiselect("Strategies", sorted(STRATEGIES), default=mine or sorted(STRATEGIES))
     c3, c4 = st.columns([3, 1])
-    firms = c3.multiselect("Prop firms (every setup is tested against each)", list(PROP_PRESETS), default=list(PROP_PRESETS),
+    firms = c3.multiselect("Prop firms (every setup is tested against each)", list(PROP_PRESETS), default=DEFAULT_FIRMS,
                            format_func=lambda k: f"{PROP_PRESETS[k].name} · ${PROP_PRESETS[k].risk:,.0f} risk/trade")
     slip = c4.number_input("Slippage (ticks per side)", 0.0, 5.0, 1.0, 0.5)
 
