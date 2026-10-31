@@ -96,11 +96,11 @@ with ui.card("Prop firms", "every strategy is tested at each account you tick", 
                 else f'<span class="bt-pill" style="color:{ui.PINK};background:{ui.PINK}1f">no bots</span>')
         with st.container(key=f"tile_f_{b}"):
             ui._html(f'<div class="bt-brand">{ui.logo(keys[0], 24)}{bname} {pill}</div>')
-            cols = st.columns(4)
+            cols = st.columns(3)
             for i, k in enumerate(keys):
                 r = PROP_PRESETS[k]
                 stage = "Funded" if r.stage == "funded" else "Eval"
-                cols[i % 4].checkbox(f"{ui.account_label(r)} · {stage}", key=f"f_{k}",
+                cols[i % 3].checkbox(f"{ui.account_label(r)} · {stage}", key=f"f_{k}",
                                      help=f"Target ${r.profit_target:,.0f} · drawdown ${r.max_loss:,.0f} {r.trailing.upper()} · "
                                           f"DLL ${r.daily_loss_limit:,.0f} · ${r.risk:,.0f} risk per trade")
 firms = [k for k in firm_keys if st.session_state[f"f_{k}"]]
