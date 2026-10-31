@@ -66,6 +66,16 @@ def o14t(bars, p):
                    hold=10 * p["hold_x"])
 
 
+def o14f(bars, p):
+    """Faster OCO: closer orders, more often, take profit always on. Longs only, NY open (what worked in the tuned run)."""
+    big, ends, a = chart(bars, p["tf"])
+    u = a * U
+    every = (np.arange(len(big)) % p["every"]) == p["every"] - 1
+    d = p["dist"] * u
+    return _finish(bars, big, ends, {**p, "hours": "open"}, every, None, a * p["stop_atr"],
+                   limit_px=big.close - d, stop_px=big.close + d, expiry=p["every"], hold=10)
+
+
 def o20t(bars, p):
     big, ends, a, lk, sk = _common(bars, {**p, "side": "trend" if p["side"] == "trend" else "long"})
     n = p["lookback"]
@@ -87,6 +97,11 @@ def _s(name, fn, desc, extra):
 
 
 TUNED = [
+    SimpleNamespace(NAME="qj_o14_fast_oco_dip_breakout", generate=o14f, MINE=True, SOURCE="QuantJourney (tuned)",
+                    DESCRIPTION="Faster Orders #14: the tuned OCO dip-or-breakout (longs, NY open) with closer orders, "
+                                "orders every 3 or 5 bars, and a closer take profit, to pass before time runs out.",
+                    PARAM_GRID={"tf": [15, 30], "stop_atr": [1.0, 1.5], "target_r": [1.5, 2, 2.5, 3],
+                                "dist": [1.0, 1.5, 2.0], "every": [3, 5]}),
     _s("qj_o05_tuned_stop_breakout", o05t, "Tuned Orders #5: stop breakout above the 20-bar closing high, plus optional "
        "take profit, morning-only entries, and a trend filter that mirrors it short below SMA(50).",
        {"side": ["long", "trend"], "hold_x": [1, 2]}),
