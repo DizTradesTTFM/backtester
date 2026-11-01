@@ -28,6 +28,8 @@ WINDOWS = {
     "ny_kz": [(830, 1100)],
     "ny_930_1200": [(930, 1200)],
     "ny_930_1530": [(930, 1530)],
+    "asia_london": [(2000, 2400), (200, 500)],
+    "asia_london_ny": [(2000, 2400), (200, 500), (830, 1100)],
 }
 CONT_1M = 60  # 1M continuation entry must come within 60 minutes of the 15M CISD
 MIN_STOP_1M = 8.0  # points
@@ -491,7 +493,8 @@ TTRADES = [
                     "and SMT divergence with ES (NQ sweeps the 4H level, ES does not).",
         PARAM_GRID={"context": ["sweep", "either"], "mode": ["reversal", "both"], "entry": ["close"],
                     "target": [2, 3, "htf"], "bias": ["none", "daily_open", "4h"], "stop": ["extreme", "cisd"],
-                    "max_stop": [0, 40], "smt": [False, True], "window": ["killzones", "london_ny_am"]},
+                    "max_stop": [0, 40], "smt": [False, True],
+                    "window": ["killzones", "london_ny_am", "asia_london", "asia_london_ny"]},
     ),
     SimpleNamespace(
         NAME="nq_ttrades_v3", generate=fractal, MINE=True, SOURCE="Claude (Capo's TTrades idea)",

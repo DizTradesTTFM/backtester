@@ -1,7 +1,7 @@
 // Capo TTrades v2: the backtester's "nq_ttrades_v2" best setup, for a NinjaTrader 8 SIM / demo account.
 // Locked settings (Capo, 2026-11-01): context = 4H sweep OR 4H FVG, mode = reversal + 15M continuation,
 // entry on the 15M CISD close, bias = with the 6 PM daily open, stop at the CISD candle, target 3R,
-// arm time 8 x 15M bars, NY session only, $150 risk (25K), max 2 trades a day (+1 more if the first two both won).
+// arm time 8 x 15M bars, Asia + London + NY kill zones, $150 risk (25K), max 2 trades a day (+1 more if the first two both won).
 //
 // Rules:
 //  - Chart: MNQ 15-minute bars, trading hours "CME US Index Futures ETH". Times are converted to New York time.
@@ -16,7 +16,9 @@
 //  - Stop: beyond the CISD candle's low (long) / high (short) + 1 point. Target: TargetR x stop.
 //  - Size: floor(RiskPerTrade / (stop x point value)), max MaxContracts; skipped if not even 1 contract.
 //  - Flat by 3:55 PM New York. One position at a time.
-//  - Optional London kill zone switch (2-5 AM NY). Backtest: NY 8:30-11 only = 11% pass; London + NY kill zones = 60%.
+//  - Session switches (NY time): Asia 8 PM-12 AM, London 2-5 AM, NY window (default 8:30-11). Backtest (3y NQ, $150, Lucid Pro 25K):
+//    Asia + London + NY = 69% pass / 22% blow-up; Asia + London = 67% / 22%; London + NY = 60% / 14%; NY alone = 11%.
+//    The trading day starts at 6 PM, so Asia trades come first and count toward the daily cap.
 //  - Optional (default OFF, still being backtested): move the stop to breakeven once price takes out the most
 //    recent 15M swing point (N bars each side) beyond the entry.
 #region Using declarations
@@ -87,7 +89,11 @@ namespace NinjaTrader.NinjaScript.Strategies
                 WindowEnd = 1100;
                 MaxTrades = 2;
                 ExtraTradeAfterTwoWins = true;
-                UseLondon = false;
+                UseNY = true;
+                UseLondon = true;
+                UseAsia = true;
+                AsiaStart = 2000;
+                AsiaEnd = 2400;
                 LondonStart = 200;
                 LondonEnd = 500;
                 BreakevenOnSwing = false;
@@ -168,7 +174,8 @@ namespace NinjaTrader.NinjaScript.Strategies
             double o = Open[0], h = High[0], l = Low[0], c = Close[0];
             double prevHi = h4h[j], prevLo = h4l[j];
             int t = em - 1;   // same clock as the backtester (minute of the last 1M bar in this 15M bar)
-            bool inWin = (t >= Hm(WindowStart) && t < Hm(WindowEnd)) || (UseLondon && t >= Hm(LondonStart) && t < Hm(LondonEnd));
+            bool inWin = (UseNY && t >= Hm(WindowStart) && t < Hm(WindowEnd)) || (UseLondon && t >= Hm(LondonStart) && t < Hm(LondonEnd))
+                         || (UseAsia && t >= Hm(AsiaStart) && t < Hm(AsiaEnd));
 
             // 1) 4H context arms a side
             bool[] tap = { l < prevLo, h > prevHi };
@@ -348,7 +355,7 @@ namespace NinjaTrader.NinjaScript.Strategies
         [NinjaScriptProperty, Range(1, 10), Display(Name = "Swing strength (bars each side)", Order = 10, GroupName = "Settings")]
         public int SwingStrength { get; set; }
 
-        [NinjaScriptProperty, Display(Name = "Also trade London kill zone (backtest: 60% pass version)", Order = 11, GroupName = "Settings")]
+        [NinjaScriptProperty, Display(Name = "Trade London kill zone", Order = 11, GroupName = "Settings")]
         public bool UseLondon { get; set; }
 
         [NinjaScriptProperty, Range(0, 2359), Display(Name = "London from (NY, hhmm)", Order = 12, GroupName = "Settings")]
@@ -356,6 +363,18 @@ namespace NinjaTrader.NinjaScript.Strategies
 
         [NinjaScriptProperty, Range(0, 2400), Display(Name = "London until (NY, hhmm)", Order = 13, GroupName = "Settings")]
         public int LondonEnd { get; set; }
+
+        [NinjaScriptProperty, Display(Name = "Trade NY window", Order = 14, GroupName = "Settings")]
+        public bool UseNY { get; set; }
+
+        [NinjaScriptProperty, Display(Name = "Trade Asia session", Order = 15, GroupName = "Settings")]
+        public bool UseAsia { get; set; }
+
+        [NinjaScriptProperty, Range(0, 2359), Display(Name = "Asia from (NY, hhmm)", Order = 16, GroupName = "Settings")]
+        public int AsiaStart { get; set; }
+
+        [NinjaScriptProperty, Range(0, 2400), Display(Name = "Asia until (NY, hhmm)", Order = 17, GroupName = "Settings")]
+        public int AsiaEnd { get; set; }
         #endregion
     }
 }
