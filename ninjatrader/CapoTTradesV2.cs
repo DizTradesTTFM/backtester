@@ -16,6 +16,7 @@
 //  - Stop: beyond the CISD candle's low (long) / high (short) + 1 point. Target: TargetR x stop.
 //  - Size: floor(RiskPerTrade / (stop x point value)), max MaxContracts; skipped if not even 1 contract.
 //  - Flat by 3:55 PM New York. One position at a time.
+//  - Optional London kill zone switch (2-5 AM NY). Backtest: NY 8:30-11 only = 11% pass; London + NY kill zones = 60%.
 //  - Optional (default OFF, still being backtested): move the stop to breakeven once price takes out the most
 //    recent 15M swing point (N bars each side) beyond the entry.
 #region Using declarations
@@ -86,6 +87,9 @@ namespace NinjaTrader.NinjaScript.Strategies
                 WindowEnd = 1100;
                 MaxTrades = 2;
                 ExtraTradeAfterTwoWins = true;
+                UseLondon = false;
+                LondonStart = 200;
+                LondonEnd = 500;
                 BreakevenOnSwing = false;
                 SwingStrength = 2;
             }
@@ -164,7 +168,7 @@ namespace NinjaTrader.NinjaScript.Strategies
             double o = Open[0], h = High[0], l = Low[0], c = Close[0];
             double prevHi = h4h[j], prevLo = h4l[j];
             int t = em - 1;   // same clock as the backtester (minute of the last 1M bar in this 15M bar)
-            bool inWin = t >= Hm(WindowStart) && t < Hm(WindowEnd);
+            bool inWin = (t >= Hm(WindowStart) && t < Hm(WindowEnd)) || (UseLondon && t >= Hm(LondonStart) && t < Hm(LondonEnd));
 
             // 1) 4H context arms a side
             bool[] tap = { l < prevLo, h > prevHi };
@@ -343,6 +347,15 @@ namespace NinjaTrader.NinjaScript.Strategies
 
         [NinjaScriptProperty, Range(1, 10), Display(Name = "Swing strength (bars each side)", Order = 10, GroupName = "Settings")]
         public int SwingStrength { get; set; }
+
+        [NinjaScriptProperty, Display(Name = "Also trade London kill zone (backtest: 60% pass version)", Order = 11, GroupName = "Settings")]
+        public bool UseLondon { get; set; }
+
+        [NinjaScriptProperty, Range(0, 2359), Display(Name = "London from (NY, hhmm)", Order = 12, GroupName = "Settings")]
+        public int LondonStart { get; set; }
+
+        [NinjaScriptProperty, Range(0, 2400), Display(Name = "London until (NY, hhmm)", Order = 13, GroupName = "Settings")]
+        public int LondonEnd { get; set; }
         #endregion
     }
 }
