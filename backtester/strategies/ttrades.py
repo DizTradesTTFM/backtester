@@ -120,6 +120,7 @@ def fractal(bars, p):
     cisd_stop = p.get("stop", "extreme") == "cisd"
     max_stop = float(p.get("max_stop", 0))
     smt = bool(p.get("smt", False))
+    max_day = int(p.get("max_day", 2))  # entry signals allowed per day (the engine still trades one at a time)
     d_o, d_h, d_l, d_c = _daily(bars)
     ebias = _easy_bias(d_h, d_l, d_c) if bias in ("daily", "daily+eq") else None
     es4 = es15 = None
@@ -201,7 +202,7 @@ def fractal(bars, p):
         if j < 0:
             continue
         t = bars.minute[e15[k]]
-        in_win = any(a <= t < b for a, b in wins) and trades_today < 2
+        in_win = any(a <= t < b for a, b in wins) and trades_today < max_day
         prev_hi, prev_lo = h4.high[j], h4.low[j]
 
         # 1) 4H context arms a reversal
@@ -255,7 +256,7 @@ def fractal(bars, p):
                     sp = (ref - sx if s == 0 else sx - ref) + STOP_PAD
                     if cont and in_win and allow[s] and place(k, s, ref, sp, prev_hi, prev_lo):
                         trades_today += 1
-                        in_win = trades_today < 2 and in_win
+                        in_win = trades_today < max_day and in_win
                     cstate[s] = -1
                 else:
                     if (c[k] < o[k]) if s == 0 else (c[k] > o[k]):
@@ -275,7 +276,7 @@ def fractal(bars, p):
                 ok = rev and in_win and allow[s] and div
                 if ok and e15m and place(k, s, ref, sp, prev_hi, prev_lo):
                     trades_today += 1
-                if ok and e1m and trades_today < 2 and cont_1m(k, s, ext[s], prev_hi, prev_lo):
+                if ok and e1m and trades_today < max_day and cont_1m(k, s, ext[s], prev_hi, prev_lo):
                     trades_today += 1
                 armed[s] = -1
                 cstate[s], cext[s], pb_seen[s] = k, ext[s], False
