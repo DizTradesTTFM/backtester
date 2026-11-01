@@ -300,6 +300,176 @@ def fractal(bars, p):
                    stop_cap=np.full(n, np.nan), expiry=np.full(n, RETEST_BARS * 15, np.int64))
 
 
+def _c2_setups(h4, poi):
+    """4H Candle 2 closures at a point of interest, per 4H candle i (as Candle 2).
+
+    Bullish C2: sweeps the previous candle's low and closes back above it, with the sweep into a POI: an unbroken
+    4H swing low, or the newest unfilled bullish 4H FVG (poi="any" also accepts a bearish Candle 1). Bearish mirrors.
+    Returns bull, bear boolean arrays.
+    """
+    n = len(h4.close)
+    hi, lo, op, cl = h4.high, h4.low, h4.open, h4.close
+    bull_gap, bear_gap = _fvgs(h4)
+    bull = np.zeros(n, bool)
+    bear = np.zeros(n, bool)
+    sw_lo = sw_hi = np.nan  # latest confirmed, still unbroken 4H swing low / high
+    for i in range(2, n):
+        # swing at i-2 is confirmed once candle i-1 closed
+        m = i - 2
+        if m >= 1 and lo[m] < lo[m - 1] and lo[m] < lo[m + 1]:
+            sw_lo = lo[m]
+        if m >= 1 and hi[m] > hi[m - 1] and hi[m] > hi[m + 1]:
+            sw_hi = hi[m]
+        if np.isfinite(sw_lo) and lo[i - 1] < sw_lo:
+            sw_lo = np.nan  # broken before Candle 2
+        if np.isfinite(sw_hi) and hi[i - 1] > sw_hi:
+            sw_hi = np.nan
+        if lo[i] < lo[i - 1] and cl[i] > lo[i - 1]:
+            gt, gb = bull_gap[i - 1]
+            at = (np.isfinite(sw_lo) and lo[i] < sw_lo) or (np.isfinite(gt) and lo[i] <= gt)
+            if poi == "any":
+                at = at or cl[i - 1] < op[i - 1]
+            bull[i] = at
+        if hi[i] > hi[i - 1] and cl[i] < hi[i - 1]:
+            gt, gb = bear_gap[i - 1]
+            at = (np.isfinite(sw_hi) and hi[i] > sw_hi) or (np.isfinite(gb) and hi[i] >= gb)
+            if poi == "any":
+                at = at or cl[i - 1] > op[i - 1]
+            bear[i] = at
+    return bull, bear
+
+
+def _cont_1m(bars, start, s, swing, wins):
+    """1M continuation from 1M bar `start`: a 1M pullback that holds `swing`, then a 1M CISD within CONT_1M minutes.
+    Returns (bar, entry price, stop distance) or None."""
+    bo, bh, bl, bc = bars.open, bars.high, bars.low, bars.close
+    n = len(bc)
+    counter = -1 if s == 0 else 1
+    lvl, last, seen, ext1 = np.nan, 0, False, np.nan
+    for i in range(start, min(n, start + CONT_1M)):
+        if bars.day[i] != bars.day[start - 1]:
+            return None
+        if (bl[i] < swing) if s == 0 else (bh[i] > swing):
+            return None
+        if seen and np.isfinite(lvl) and ((bc[i] > lvl) if s == 0 else (bc[i] < lvl)):
+            if not any(a <= bars.minute[i] < b for a, b in wins):
+                return None
+            sp = max((bc[i] - ext1) if s == 0 else (ext1 - bc[i]), 0.0) + STOP_PAD
+            return i, bc[i], max(sp, MIN_STOP_1M)
+        cur = 1 if bc[i] > bo[i] else (-1 if bc[i] < bo[i] else 0)
+        if cur == counter:
+            if last != counter:
+                lvl = bo[i]
+            seen = True
+        if seen:
+            x = bl[i] if s == 0 else bh[i]
+            ext1 = x if not np.isfinite(ext1) else (min(ext1, x) if s == 0 else max(ext1, x))
+        if cur != 0:
+            last = cur
+    return None
+
+
+def c2c3(bars, p):
+    """TTrades Fractal Model the TTrades way: 4H Candle 2 closure at a POI, then trade Candle 3 on a lower-timeframe
+    CISD while price holds the EQ of Candle 2's wick."""
+    n = len(bars)
+    h4, e4 = to_timeframe(bars, 240)
+    mx, ex = to_timeframe(bars, p["exec_tf"])
+    j_of = np.searchsorted(e4, ex, side="left")  # 4H candle each exec bar belongs to (Candle 3 candidate)
+    bull, bear = _c2_setups(h4, p["poi"])
+    hi, lo, op, cl = h4.high, h4.low, h4.open, h4.close
+    wins = [(hhmm(a), hhmm(b)) for a, b in WINDOWS[p["window"]]]
+    _, d_h, d_l, d_c = _daily(bars)
+    ebias = _easy_bias(d_h, d_l, d_c) if p["bias"] == "daily" else None
+    small_wick = p["wick"] == "small"
+    one_min = p["entry"] == "1m_cont"
+
+    entry = np.zeros(n, np.int8)
+    stop = np.zeros(n)
+    tgt = np.zeros(n)
+    o, h, l, c = mx.open, mx.high, mx.low, mx.close
+    cur_j = -1
+    valid = [False, False]
+    weq = [np.nan, np.nan]
+    c2x = [np.nan, np.nan]  # Candle 2 extreme (stop option) and Candle 2 opposite end (target option)
+    c2o = [np.nan, np.nan]
+    eq1 = np.nan  # EQ of Candle 1's range
+    ext = [np.nan, np.nan]  # Candle 3 extreme so far
+    level = [np.nan, np.nan]
+    last_dir = 0
+    trades_today, day = 0, -1
+    for k in range(len(c)):
+        d = mx.day[k]
+        if d != day:
+            day, trades_today = d, 0
+        j = j_of[k]
+        if j != cur_j:  # a new 4H candle starts: it is Candle 3 if the one before was a Candle 2
+            cur_j = j
+            i = j - 1
+            valid = [False, False]
+            level = [np.nan, np.nan]
+            last_dir = 0
+            if i >= 2 and j < len(cl):
+                rng = hi[i] - lo[i]
+                for s, ok in ((0, bull[i]), (1, bear[i])):
+                    if not ok or rng <= 0:
+                        continue
+                    wick = (min(op[i], cl[i]) - lo[i]) if s == 0 else (hi[i] - max(op[i], cl[i]))
+                    if small_wick and wick > 0.5 * rng:
+                        continue
+                    valid[s] = True
+                    weq[s] = (lo[i] + wick / 2) if s == 0 else (hi[i] - wick / 2)
+                    c2x[s] = lo[i] if s == 0 else hi[i]
+                    c2o[s] = hi[i] if s == 0 else lo[i]
+                    ext[s] = np.nan
+                eq1 = (hi[i - 1] + lo[i - 1]) / 2
+        t = bars.minute[ex[k]]
+        in_win = any(a <= t < b for a, b in wins) and trades_today < 2
+        for s in (0, 1):
+            if not valid[s]:
+                continue
+            ext[s] = (l[k] if not np.isfinite(ext[s]) else min(ext[s], l[k])) if s == 0 else \
+                (h[k] if not np.isfinite(ext[s]) else max(ext[s], h[k]))
+            if (c[k] < weq[s]) if s == 0 else (c[k] > weq[s]):
+                valid[s] = False  # closed through the wick EQ: Candle 3 failed
+                continue
+            fire = np.isfinite(level[s]) and ((c[k] > level[s]) if s == 0 else (c[k] < level[s]))
+            if not fire:
+                continue
+            valid[s] = False  # one entry per Candle 3 per side
+            if not in_win or (ebias is not None and ebias[d] != (1 if s == 0 else -1)):
+                continue
+            if one_min:
+                got = _cont_1m(bars, ex[k] + 1, s, ext[s], wins)
+                if got is None:
+                    continue
+                bi, px, sp = got
+            else:
+                bi, px = ex[k], c[k]
+                sx = c2x[s] if p["stop"] == "c2" else ext[s]
+                sp = (px - sx if s == 0 else sx - px) + STOP_PAD
+            if sp <= 0 or entry[bi] != 0:
+                continue
+            if p["target"] in ("c2", "eq"):
+                lvl_t = c2o[s] if p["target"] == "c2" else eq1
+                tp = (lvl_t - px) if s == 0 else (px - lvl_t)
+                tp = tp if np.isfinite(tp) and tp >= sp else 0.0
+            else:
+                tp = sp * float(p["target"])
+            if tp <= 0:
+                continue
+            entry[bi], stop[bi], tgt[bi] = (1 if s == 0 else -1), sp, tp
+            trades_today += 1
+        cur = 1 if c[k] > o[k] else (-1 if c[k] < o[k] else 0)
+        if cur == -1 and last_dir != -1:
+            level[0] = o[k]
+        if cur == 1 and last_dir != 1:
+            level[1] = o[k]
+        if cur != 0:
+            last_dir = cur
+    return Signals(entry, stop, tgt, default_force_exit(bars))
+
+
 TTRADES = [
     SimpleNamespace(
         NAME="nq_ttrades_fractal", generate=fractal, MINE=True, SOURCE="Claude (Capo's TTrades idea)",
@@ -331,5 +501,16 @@ TTRADES = [
         PARAM_GRID={"context": ["sweep", "either"], "mode": ["reversal"], "entry": ["15m_cisd", "1m_cont", "both"],
                     "target": [2, 3, "pdh_pdl"], "bias": ["none", "daily", "daily+eq"], "stop": ["extreme", "cisd"],
                     "smt": [False, True], "window": ["ny_kz", "ny_930_1200", "ny_930_1530"]},
+    ),
+    SimpleNamespace(
+        NAME="nq_ttrades_v4", generate=c2c3, MINE=True, SOURCE="Claude (Capo's TTrades idea)",
+        DESCRIPTION="TTrades Fractal Model the TTrades way, NY only: a 4H Candle 2 sweeps the previous 4H high/low at a "
+                    "point of interest (unbroken 4H swing or 4H FVG; optionally an opposing Candle 1) and closes back "
+                    "inside. During Candle 3, enter on a 15M or 5M CISD (or a 1M CISD continuation after it) while price "
+                    "holds the EQ of Candle 2's wick. Stop beyond the Candle 3 swing or Candle 2's extreme. Target 2-3R, "
+                    "Candle 2's opposite end, or Candle 1's EQ. Optional: small-wick filter, Easy Daily Bias.",
+        PARAM_GRID={"exec_tf": [15, 5], "entry": ["cisd", "1m_cont"], "target": [2, 3, "c2", "eq"],
+                    "stop": ["swing", "c2"], "poi": ["strict", "any"], "wick": ["any", "small"],
+                    "bias": ["none", "daily"], "window": ["ny_kz", "ny_930_1200", "ny_930_1530"]},
     ),
 ]
