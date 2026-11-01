@@ -19,6 +19,10 @@
 //  - Session switches (NY time): Asia 8 PM-12 AM, London 2-5 AM, NY window (default 8:30-11). Backtest (3y NQ, $150, Lucid Pro 25K):
 //    Asia + London + NY = 69% pass / 22% blow-up; Asia + London = 67% / 22%; London + NY = 60% / 14%; NY alone = 11%.
 //    The trading day starts at 6 PM, so Asia trades come first and count toward the daily cap.
+//  - Prop rule guard (live/sim only), defaults = Lucid Flex 25K: $1,250 target, $1,000 EOD trailing drawdown locking at
+//    start + $100, $600 daily loss limit, stop for the day at +$500 (40% consistency). No new trade if a full $ loss
+//    could break the daily limit or the drawdown floor; stops trading once the target is reached. Enter your real
+//    balance and highest end-of-day balance each time you enable it (NinjaTrader does not know the firm's numbers).
 //  - Optional (default OFF, still being backtested): move the stop to breakeven once price takes out the most
 //    recent 15M swing point (N bars each side) beyond the entry.
 #region Using declarations
@@ -60,6 +64,9 @@ namespace NinjaTrader.NinjaScript.Strategies
         private int lastDir;
         private int k = -1; // 15M bar counter
         private int tradesToday, closedToday, winsToday;
+        // prop guard (live/sim only: historical bars on the chart are not counted)
+        private double balance = double.NaN, highEod = double.NaN, dayPnl;
+        private bool passed;
 
         // orders
         private Order entryOrder, stopOrder, targetOrder, flatOrder;
@@ -98,6 +105,17 @@ namespace NinjaTrader.NinjaScript.Strategies
                 LondonEnd = 500;
                 BreakevenOnSwing = false;
                 SwingStrength = 2;
+                PropGuard = true;
+                StartBalance = 25000;
+                BalanceNow = 25000;
+                HighestEodBalance = 25000;
+                ProfitTarget = 1250;
+                TrailingDrawdown = 1000;
+                DrawdownLocksAt = 100;
+                DailyLossLimit = 600;
+                MaxDayProfit = 500;
+                StopAtTarget = true;
+                CommissionPerContract = 1.50;
             }
             else if (State == State.Configure)
             {
@@ -114,8 +132,30 @@ namespace NinjaTrader.NinjaScript.Strategies
         private static bool Active(Order o) { return o != null && !Order.IsTerminalState(o.OrderState); }
         private double Tick(double px) { return Instrument.MasterInstrument.RoundToTickSize(px); }
 
+        private bool Live() { return State == State.Realtime; }
+
+        private double Floor()
+        {
+            // EOD trailing drawdown: highest end-of-day balance minus the drawdown, locked once it reaches start + lock
+            return Math.Min(highEod - TrailingDrawdown, StartBalance + DrawdownLocksAt);
+        }
+
+        /// <summary>Prop rules: no new trade if a full loss could break the daily loss limit or the drawdown,
+        /// or once the target / the consistency day cap is reached.</summary>
+        private bool GuardOk()
+        {
+            if (!PropGuard || !Live()) return true;
+            if (double.IsNaN(balance)) { balance = BalanceNow; highEod = Math.Max(HighestEodBalance, BalanceNow); }
+            if (passed || (StopAtTarget && balance >= StartBalance + ProfitTarget)) { passed = true; return false; }
+            if (DailyLossLimit > 0 && dayPnl - RiskPerTrade <= -DailyLossLimit) return false;
+            if (balance - RiskPerTrade <= Floor()) return false;
+            if (MaxDayProfit > 0 && dayPnl >= MaxDayProfit) return false;
+            return true;
+        }
+
         private bool CanTrade()
         {
+            if (!GuardOk()) return false;
             if (tradesToday < MaxTrades) return true;
             return ExtraTradeAfterTwoWins && MaxTrades == 2 && tradesToday == 2 && closedToday == 2 && winsToday == 2;
         }
@@ -153,6 +193,8 @@ namespace NinjaTrader.NinjaScript.Strategies
             {
                 FinishCandle();
                 curDay = tday;
+                if (!double.IsNaN(balance)) highEod = Math.Max(highEod, balance);   // end of the trading day
+                dayPnl = 0;
                 dayOpen = Open[0];
                 tradesToday = closedToday = winsToday = 0;
                 armed[0] = armed[1] = -1;
@@ -316,6 +358,12 @@ namespace NinjaTrader.NinjaScript.Strategies
                 && o.OrderState == OrderState.Filled)
             {
                 double pnl = dir * (o.AverageFillPrice - fillPx);
+                if (Live() && !double.IsNaN(balance))
+                {
+                    double usd = pnl * Instrument.MasterInstrument.PointValue * o.Filled - CommissionPerContract * o.Filled;
+                    balance += usd;
+                    dayPnl += usd;
+                }
                 closedToday++;
                 if (pnl > 0) winsToday++;
                 if (Active(stopOrder)) CancelOrder(stopOrder);
@@ -375,6 +423,39 @@ namespace NinjaTrader.NinjaScript.Strategies
 
         [NinjaScriptProperty, Range(0, 2400), Display(Name = "Asia until (NY, hhmm)", Order = 17, GroupName = "Settings")]
         public int AsiaEnd { get; set; }
+
+        [NinjaScriptProperty, Display(Name = "Prop rule guard ON", Order = 1, GroupName = "Prop rules")]
+        public bool PropGuard { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "Account start balance", Order = 2, GroupName = "Prop rules")]
+        public double StartBalance { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "Balance right now (when you enable)", Order = 3, GroupName = "Prop rules")]
+        public double BalanceNow { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "Highest end-of-day balance so far", Order = 4, GroupName = "Prop rules")]
+        public double HighestEodBalance { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "Profit target ($)", Order = 5, GroupName = "Prop rules")]
+        public double ProfitTarget { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "EOD trailing drawdown ($)", Order = 6, GroupName = "Prop rules")]
+        public double TrailingDrawdown { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "Drawdown locks at start + ($)", Order = 7, GroupName = "Prop rules")]
+        public double DrawdownLocksAt { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "Daily loss limit ($, 0 = none)", Order = 8, GroupName = "Prop rules")]
+        public double DailyLossLimit { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "Stop for the day after +$ (consistency, 0 = off)", Order = 9, GroupName = "Prop rules")]
+        public double MaxDayProfit { get; set; }
+
+        [NinjaScriptProperty, Display(Name = "Stop trading once target is hit", Order = 10, GroupName = "Prop rules")]
+        public bool StopAtTarget { get; set; }
+
+        [NinjaScriptProperty, Range(0, double.MaxValue), Display(Name = "Commission per micro round trip ($)", Order = 11, GroupName = "Prop rules")]
+        public double CommissionPerContract { get; set; }
         #endregion
     }
 }
