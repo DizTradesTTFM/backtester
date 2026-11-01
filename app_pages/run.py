@@ -15,7 +15,7 @@ from app_pages import ui
 
 JOB = "backtest"
 TASK = "Backtester nightly"
-MARKETS = {"ES": "S&P 500 (MES)", "NQ": "Nasdaq (MNQ)"}
+MARKETS = {"ES": "S&P 500 (MES)", "NQ": "Nasdaq (MNQ)", "GC": "Gold (MGC)"}
 
 ui.header("Run", "Tick what to test. Press Start.")
 

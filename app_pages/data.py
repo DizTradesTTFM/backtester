@@ -10,7 +10,7 @@ from app_pages import ui
 from scripts.download_data import plan, price
 
 JOB = "download"
-SYMBOLS = ["ES", "NQ"]
+SYMBOLS = ["ES", "NQ", "GC"]
 KEY_FILE = DATA_DIR / ".databento_key"
 
 ui.header("Data", "1-minute ES + NQ from Databento", [("Have", ui.GREEN), ("Update", ui.BLUE)])

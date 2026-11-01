@@ -30,6 +30,8 @@ INSTRUMENTS = {
     "NQ": Instrument("NQ", 0.25, 20.0, 4.50),
     "MES": Instrument("MES", 0.25, 5.0, 1.50, "ES"),
     "MNQ": Instrument("MNQ", 0.25, 2.0, 1.50, "NQ"),
+    "GC": Instrument("GC", 0.10, 100.0, 4.50),  # gold (COMEX)
+    "MGC": Instrument("MGC", 0.10, 10.0, 1.50, "GC"),
 }
 
 
