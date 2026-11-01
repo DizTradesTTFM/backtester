@@ -11,9 +11,10 @@ from scripts.download_data import plan, price
 
 JOB = "download"
 SYMBOLS = ["ES", "NQ", "GC"]
+NEW_START = "2023-10-01"  # a market with no data yet starts here (last ~3 years, cheaper)
 KEY_FILE = DATA_DIR / ".databento_key"
 
-ui.header("Data", "1-minute ES + NQ from Databento", [("Have", ui.GREEN), ("Update", ui.BLUE)])
+ui.header("Data", "1-minute ES, NQ + gold from Databento", [("Have", ui.GREEN), ("Update", ui.BLUE)])
 
 
 @st.cache_data(ttl=30)
@@ -56,7 +57,7 @@ with ui.card("Update data", "02 · Buy new days", ui.BLUE, key="update"):
     key = st.text_input("Databento API key", value=saved, type="password", help="Saved on this PC only, in data/.databento_key")
     if st.button("Check price", disabled=not key or jobs.running(JOB)):
         try:
-            todo = plan(SYMBOLS, update=True)
+            todo = plan(SYMBOLS, start=NEW_START, update=True)
             cost = price(db.Historical(key), todo) if todo else 0.0
             st.session_state["dl_quote"] = (todo, cost)
             DATA_DIR.mkdir(exist_ok=True)
@@ -73,7 +74,7 @@ with ui.card("Update data", "02 · Buy new days", ui.BLUE, key="update"):
             span = ", ".join(f"{s} {a} to {b}" for s, a, b in todo)
             st.write(f"**{span}** costs **\\${cost:,.2f}** on Databento.")
             if st.button(f"Buy and download (\\${cost:,.2f})", type="primary"):
-                jobs.start(JOB, ["-m", "scripts.download_data", "--update", "--yes"], env={"DATABENTO_API_KEY": key})
+                jobs.start(JOB, ["-m", "scripts.download_data", "--symbols", *SYMBOLS, "--start", NEW_START, "--update", "--yes"], env={"DATABENTO_API_KEY": key})
                 st.session_state.pop("dl_quote")
                 st.rerun()
     st.caption("After new data arrives, the next run on the Run page starts a fresh batch automatically.")
